@@ -27,10 +27,14 @@ pub enum UserEvent {
     /// Layout change requested by the terminal/split UI.
     SetDock { mode: String },
     SplitDelta { delta: i32 },
-    /// User action from the browser toolbar (agent cannot reach this panel).
-    BrowserAction { kind: String, value: Option<String> },
-    /// A page finished loading; used to sync the address bar.
-    PageLoaded { url: String },
+    /// User action from the browser toolbar or a tab page. `tab` identifies the source tab.
+    BrowserAction { kind: String, value: Option<String>, tab: Option<usize> },
+    /// User action from the tab strip.
+    TabAction { kind: String, index: Option<usize> },
+    /// Tab strip page finished loading; safe to inject the tab list.
+    TabsReady,
+    /// A tab finished loading; used to sync the address bar and tab strip.
+    PageLoaded { url: String, tab: usize },
 }
 
 pub fn pipe_name() -> String {

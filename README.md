@@ -9,6 +9,9 @@ A local Windows desktop app with an **embedded OpenCode terminal** (xterm.js + C
 - Click **Dock: Left / Bottom** in the terminal toolbar, or call `browser_dock {mode:"left"|"bottom"|"toggle"}`.
 - The terminal runs OpenCode with cwd = repository root, so it loads the same `opencode.jsonc` and MCP servers.
 - The page panel has a **user-only toolbar**: address bar, Back, Forward, Reload, Home. Type a URL and press Enter, or click a button. Navigation is deliberately not exposed to the agent; the MCP viewport starts below the toolbar.
+- Four real tabs are available. The **right-edge tab strip** shows every open tab; click a tab (user) or call `browser_focus_tab` (agent) to switch. `+ New tab` loads the New Tab page in the next slot.
+- The first tab opens an app-styled **New Tab** page with a search box and quick links.
+- The agent uses an **in-app virtual cursor**: a cyan ring drawn on the page at the agent's logical position. The page's native pointer is hidden briefly during agent actions. Always use `browser_screenshot` to see where the agent actually is.
 - The toolbar address bar stays in sync with page loads.
 - Test hook: `AGENT_BROWSER_TEST_NAV=https://example.com agent-browser.exe` navigates on startup (used to verify the IPC path).
 

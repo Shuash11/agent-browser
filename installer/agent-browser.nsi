@@ -1,6 +1,6 @@
 !define APPNAME "Agent Browser"
 !ifndef VERSION
-  !define VERSION "0.1.0"
+  !define VERSION "0.1.1"
 !endif
 !define PUBLISHER "Shuash11"
 

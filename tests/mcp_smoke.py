@@ -63,8 +63,12 @@ def main() -> None:
         print("viewport error:", vp_resp)
         return
     vp = json.loads(vp_resp["result"]["content"][0]["text"])["viewport"]
+    print("tabs:", call("browser_list_tabs", {}, 2))
+    print("focus tab 1:", call("browser_focus_tab", {"index": 1}, 13))
+    time.sleep(0.4)
     # Button A centre in the fixture, relative to the content viewport.
     bx, by = vp["x"] + 100, vp["y"] + 221
+    print("move cursor:", call("browser_move", {"x": bx, "y": by}, 14))
     shot = str(Path(__file__).resolve().parents[1] / "analysis_mcp_before.png")
     print("screenshot:", call("browser_screenshot", {"path": shot}, 4))
     print("click:", call("browser_click", {"x": bx, "y": by, "button": "left"}, 5))

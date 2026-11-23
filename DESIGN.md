@@ -30,7 +30,9 @@ Screens: terminal panel (agent session), browser toolbar (user navigation), page
 Typography: system stack `Segoe UI Variable, Segoe UI, Inter, system-ui, sans-serif`; terminal `Cascadia Mono, JetBrains Mono, Consolas, monospace`. Sizes: 11px labels, 12px toolbar, 13px terminal/body, 15px panel title. Weight 600 for titles, 400 body. Line-height 1.35. Letter-spacing 0.02em on uppercase labels only.
 
 ## Layout
-- Window 1600×900 default, **resizable** with min 1000×640.
+- Window 1600×900 default, **resizable** with min 1100×680.
+- Four page tabs share one WebContext. A 140 px tab strip sits on the far right; the agent viewport excludes it.
+- Tab 1 defaults to an app-styled New Tab page (search + quick links), not an external site.
 - Left dock: terminal `term_size` (default 540, clamped 260…w−400), divider 8px, toolbar 44px, page fills remainder.
 - Bottom dock: page top, toolbar 44px, divider 8px, terminal bottom (default h/2, clamped 180…h−300).
 - Toolbar internals: Back 32px, Forward 32px, Reload 32px, Home 32px, gaps 8px, URL flex `min-width:0`, status 16px. Padding 12px.
@@ -50,7 +52,7 @@ Typography: system stack `Segoe UI Variable, Segoe UI, Inter, system-ui, sans-se
 - URL input truncates with ellipsis, never pushes controls off-screen; no horizontal scroll.
 
 ## Motion
-Only hover/focus color transitions (120ms ease). No entrance animations, no blurred backgrounds behind content. `prefers-reduced-motion` removes transitions; state still changes via color/border.
+Only hover/focus color transitions (120ms ease). No entrance animations, no blurred backgrounds behind content. The virtual cursor is a static cyan ring (no easing); it is removed from the page 900 ms after the last agent action. `prefers-reduced-motion` removes transitions; state still changes via color/border.
 
 ## Accessibility
 Visible focus rings, semantic buttons with `aria-label`, live region for navigation status, ≥24px targets, contrast-checked muted text, keyboard operation of all toolbar controls, reduced-motion support. Drag has a non-drag alternative (`browser_dock` / dock button).

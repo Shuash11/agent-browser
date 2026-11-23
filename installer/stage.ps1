@@ -1,4 +1,4 @@
-param([string]$Version = "0.1.0")
+param([string]$Version = "0.1.1")
 
 $root = Split-Path -Parent $PSScriptRoot
 $stage = Join-Path $PSScriptRoot "staging"
@@ -17,6 +17,8 @@ $files = @(
   "assets/terminal/index.html",
   "assets/terminal/toolbar.html",
   "assets/terminal/divider.html",
+  "assets/terminal/newtab.html",
+  "assets/terminal/tabs.html",
   "assets/terminal/theme.css",
   "assets/terminal/xterm.min.js",
   "assets/terminal/xterm.min.css",
