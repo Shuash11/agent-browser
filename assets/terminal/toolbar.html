@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Browser toolbar</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  html, body { overflow: hidden; }
+  #bar { height:100%; display:flex; align-items:center; gap:var(--space-2);
+         padding:0 var(--space-3); background:var(--surface);
+         border-bottom:1px solid var(--line); }
+  .nav { width:32px; height:28px; padding:0; font-size:14px; flex:none; }
+  #url { flex:1; min-width:0; height:28px; padding:0 var(--space-3);
+         background:var(--bg); color:var(--text); border:1px solid var(--line);
+         border-radius:14px; font-family:var(--sans); font-size:12px; outline:none;
+         transition:border-color var(--t); }
+  #url:focus { border-color:var(--accent); }
+  #url[aria-invalid="true"] { border-color:var(--danger); }
+  #status { width:16px; color:var(--muted); font-size:11px; flex:none; }
+  @media (max-width:520px) {
+    .nav { width:28px; }
+    #bar { padding:0 var(--space-2); gap:var(--space-1); }
+  }
+</style>
+</head>
+<body>
+<div id="bar" role="toolbar" aria-label="Browser navigation">
+  <button class="nav" id="back" title="Back" aria-label="Back">&#8592;</button>
+  <button class="nav" id="fwd" title="Forward" aria-label="Forward">&#8594;</button>
+  <button class="nav" id="reload" title="Reload" aria-label="Reload">&#8635;</button>
+  <button class="nav" id="home" title="Home" aria-label="Home">&#8962;</button>
+  <input id="url" aria-label="Address bar" placeholder="https://…" autocomplete="off" spellcheck="false">
+  <span id="status" role="status" aria-live="polite"></span>
+</div>
+<script>
+  function send(msg) { window.chrome.webview.postMessage(JSON.stringify(msg)); }
+  document.getElementById('back').onclick = function () { send({ type: 'back' }); };
+  document.getElementById('fwd').onclick = function () { send({ type: 'forward' }); };
+  document.getElementById('reload').onclick = function () { send({ type: 'reload' }); };
+  document.getElementById('home').onclick = function () { send({ type: 'home' }); };
+  var input = document.getElementById('url');
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { send({ type: 'navigate', url: input.value }); }
+  });
+  var params = new URLSearchParams(location.search);
+  if (params.has('nav')) { send({ type: 'navigate', url: params.get('nav') }); }
+  window.__setUrl = function (u) {
+    input.value = u;
+    input.setAttribute('aria-invalid', 'false');
+  };
+  window.__setStatus = function (s) {
+    document.getElementById('status').textContent = s;
+    input.setAttribute('aria-invalid', s ? 'true' : 'false');
+  };
+</script>
+</body>
+</html>

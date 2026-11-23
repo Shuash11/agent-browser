@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; leaving it unchanged."
+            exit 0
+          fi
+
+          gh release create "$tag" \
+            --verify-tag \
+            --title "Agent Browser $tag" \
+            --notes "$(cat <<'EOF'
+          ## Agent Browser v0.1.0
+
+          - Embedded OpenCode terminal
+          - Draggable left/bottom dock
+          - 10 MCP browser tools
+          - Dark graphite UI
+          - NSIS installer
+
+          ### Prerequisites
+
+          - Windows 11
+          - WebView2
+          - OpenCode available on PATH
+          - `NVIDIA_API_KEY` set in the environment for the model
+          EOF
+          )"

@@ -1,0 +1,10 @@
+/target/
+/tooling/
+/data/
+/downloads/
+/logs/
+/analysis*.png
+/installer/staging/
+/installer/output/
+/installer/test-install/
+*.log

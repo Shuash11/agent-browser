@@ -1,0 +1,164 @@
+//! MCP stdio server exposing cursor-level browser control to OpenCode.
+
+use rmcp::{
+    handler::server::wrapper::Parameters,
+    schemars::JsonSchema,
+    tool, tool_router,
+    transport::stdio,
+    ErrorData as McpError, ServiceExt,
+};
+use serde::Deserialize;
+
+use crate::ipc;
+use crate::protocol::{Command, MouseButton, Response};
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PathParams {
+    /// Absolute path where the PNG screenshot should be saved.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PointParams {
+    /// Screen X coordinate (must be inside the page viewport).
+    pub x: i32,
+    /// Screen Y coordinate (must be inside the page viewport).
+    pub y: i32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ClickParams {
+    pub x: i32,
+    pub y: i32,
+    /// left, right, or middle
+    pub button: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ScrollParams {
+    pub x: i32,
+    pub y: i32,
+    pub dx: i32,
+    pub dy: i32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TextParams {
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct KeyParams {
+    /// Enter, Tab, Escape, Backspace, or Ctrl+L
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IndexParams {
+    pub index: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DockParams {
+    /// left, bottom, or toggle
+    pub mode: String,
+}
+
+fn pack(r: Result<Response, String>) -> Result<String, McpError> {
+    match r {
+        Ok(resp) => serde_json::to_string(&resp)
+            .map_err(|e| McpError::internal_error(e.to_string(), None)),
+        Err(msg) => Err(McpError::internal_error(msg, None)),
+    }
+}
+
+#[derive(Clone)]
+pub struct BrowserService;
+
+#[tool_router(server_handler)]
+impl BrowserService {
+    #[tool(description = "Capture the visible page viewport only (not the tab panel). Returns a PNG path.")]
+    async fn browser_screenshot(
+        &self,
+        Parameters(p): Parameters<PathParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Screenshot { path: p.path }).await)
+    }
+
+    #[tool(description = "Move the mouse cursor to a screen coordinate inside the page viewport.")]
+    async fn browser_move(
+        &self,
+        Parameters(p): Parameters<PointParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Move { x: p.x, y: p.y }).await)
+    }
+
+    #[tool(description = "Click inside the page viewport. Password fields are refused.")]
+    async fn browser_click(
+        &self,
+        Parameters(p): Parameters<ClickParams>,
+    ) -> Result<String, McpError> {
+        let button = match p.button.to_lowercase().as_str() {
+            "right" => MouseButton::Right,
+            "middle" => MouseButton::Middle,
+            _ => MouseButton::Left,
+        };
+        pack(ipc::call(Command::Click { x: p.x, y: p.y, button }).await)
+    }
+
+    #[tool(description = "Scroll at a point inside the page viewport. dy>0 scrolls down.")]
+    async fn browser_scroll(
+        &self,
+        Parameters(p): Parameters<ScrollParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Scroll { x: p.x, y: p.y, dx: p.dx, dy: p.dy }).await)
+    }
+
+    #[tool(description = "Type text into the focused page field. Password fields are refused.")]
+    async fn browser_type(
+        &self,
+        Parameters(p): Parameters<TextParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Type { text: p.text }).await)
+    }
+
+    #[tool(description = "Press a named key: Enter, Tab, Escape, Backspace, or Ctrl+L.")]
+    async fn browser_key(
+        &self,
+        Parameters(p): Parameters<KeyParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Key { key: p.key }).await)
+    }
+
+    #[tool(description = "Get the page viewport rectangle in physical screen pixels.")]
+    async fn browser_get_viewport(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::GetViewport).await)
+    }
+
+    #[tool(description = "List the tabs currently open in the user's panel.")]
+    async fn browser_list_tabs(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::ListTabs).await)
+    }
+
+    #[tool(description = "Focus an existing tab by index. Does not create tabs.")]
+    async fn browser_focus_tab(
+        &self,
+        Parameters(p): Parameters<IndexParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::FocusTab { index: p.index }).await)
+    }
+
+    #[tool(description = "Dock the terminal panel left or bottom (or toggle).")]
+    async fn browser_dock(
+        &self,
+        Parameters(p): Parameters<DockParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Dock { mode: p.mode }).await)
+    }
+}
+
+pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let service = BrowserService.serve(stdio()).await?;
+    service.waiting().await?;
+    Ok(())
+}

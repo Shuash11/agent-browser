@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Panel divider</title>
+<link rel="stylesheet" href="theme.css">
+<style>
+  html, body { margin:0; height:100%; background:var(--line); overflow:hidden; }
+  body.horizontal { cursor:col-resize; }
+  body.vertical { cursor:row-resize; }
+  #handle { width:100%; height:100%; }
+  #handle:hover { background:var(--accent-soft); }
+</style>
+</head>
+<body class="horizontal">
+<div id="handle" role="separator" aria-label="Resize panels"></div>
+<script>
+  window.__setDock = function (mode) {
+    document.body.className = mode === 'bottom' ? 'vertical' : 'horizontal';
+  };
+  var dragging = false;
+  var last = 0;
+  var handle = document.getElementById('handle');
+  handle.addEventListener('pointerdown', function (e) {
+    dragging = true;
+    last = document.body.className === 'vertical' ? e.clientY : e.clientX;
+    handle.setPointerCapture(e.pointerId);
+  });
+  handle.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    var now = document.body.className === 'vertical' ? e.clientY : e.clientX;
+    var delta = now - last;
+    last = now;
+    if (delta !== 0) {
+      window.chrome.webview.postMessage(JSON.stringify({ type: 'split', delta: delta }));
+    }
+  });
+  handle.addEventListener('pointerup', function () { dragging = false; });
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent Browser Test Fixture</title>
+<style>
+  body { background:#111827; color:#e5e7eb; font:20px system-ui; margin:0; padding:32px; }
+  h1 { color:#4dd8ff; }
+  button { background:#1f2937; color:#fff; border:2px solid #4dd8ff; border-radius:8px;
+           padding:14px 22px; font-size:20px; cursor:pointer; margin:8px; }
+  #status { margin-top:24px; padding:16px; border:1px solid #374151; border-radius:8px; }
+  input { padding:10px; font-size:18px; border-radius:6px; border:1px solid #4b5563; }
+</style>
+</head>
+<body>
+  <h1>Agent Browser Fixture</h1>
+  <p>Click a button and the status below should change. The agent must only interact with this page area.</p>
+  <button id="a" onclick="document.getElementById('status').textContent='BUTTON A CLICKED'">Button A</button>
+  <button id="b" onclick="document.getElementById('status').textContent='BUTTON B CLICKED'">Button B</button>
+  <input id="text" placeholder="type here" />
+  <input id="pw" type="password" placeholder="password (agent must never type here)" />
+  <div id="status">STATUS: nothing yet</div>
+</body>
+</html>
