@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>New Tab</title>
 <link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="icons.css">
 <style>
   html, body { height:100%; }
   body { display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -18,6 +19,7 @@
           justify-content:center; gap:6px; background:var(--surface-solid);
           border:1px solid var(--line); border-radius:var(--radius-md); }
   .chip b { font-size:17px; font-weight:600; color:var(--text); }
+  .chip .icon { width:22px; height:22px; color:var(--accent); }
   .chip span { font-size:11px; color:var(--muted); }
   .divider { width:min(560px, 90%); height:1px; background:var(--line); margin:var(--space-4) 0; }
   .custom { width:min(560px, 90%); display:flex; gap:var(--space-2); align-items:center; }
@@ -39,13 +41,13 @@
 <div class="sub">Choose a destination, or use the address bar above</div>
 
 <div class="shortcuts">
-  <button class="chip" data-url="https://www.tiktok.com"><b>TT</b><span>TikTok</span></button>
-  <button class="chip" data-url="https://www.youtube.com"><b>YT</b><span>YouTube</span></button>
-  <button class="chip" data-url="https://www.facebook.com"><b>f</b><span>Facebook</span></button>
-  <button class="chip" data-url="https://www.instagram.com"><b>IG</b><span>Instagram</span></button>
-  <button class="chip" data-url="https://github.com"><b>GH</b><span>GitHub</span></button>
-  <button class="chip" data-url="https://www.microsoft.com/edge"><b>E</b><span>Edge</span></button>
-  <button class="chip" data-url="https://www.google.com/chrome"><b>C</b><span>Chrome</span></button>
+  <button class="chip" data-url="https://www.tiktok.com"><span class="icon i-globe"></span><span>TikTok</span></button>
+  <button class="chip" data-url="https://www.youtube.com"><span class="icon i-circle-play"></span><span>YouTube</span></button>
+  <button class="chip" data-url="https://www.facebook.com"><span class="icon i-globe"></span><span>Facebook</span></button>
+  <button class="chip" data-url="https://www.instagram.com"><span class="icon i-globe"></span><span>Instagram</span></button>
+  <button class="chip" data-url="https://github.com"><span class="icon i-app-window"></span><span>GitHub</span></button>
+  <button class="chip" data-url="https://www.microsoft.com/edge"><span class="icon i-monitor"></span><span>Edge</span></button>
+  <button class="chip" data-url="https://www.google.com/chrome"><span class="icon i-globe"></span><span>Chrome</span></button>
 </div>
 
 <div class="divider"></div>

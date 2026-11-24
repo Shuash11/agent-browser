@@ -2,7 +2,7 @@
 //! right-edge tab strip, draggable splitter, and a virtual agent cursor.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tao::dpi::LogicalSize as TaoLogicalSize;
@@ -134,6 +134,38 @@ fn window_command(action: &str) {
             _ => {}
         }
     }
+}
+
+fn serve_abterm(assets: &Path, request: &wry::http::Request<Vec<u8>>) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
+    let path = request.uri().path();
+    let (file, mime): (&str, &str) = if let Some(name) = path.strip_prefix("/icons/") {
+        let safe = name.rsplit('/').next().unwrap_or("");
+        if safe.contains("..") || !safe.ends_with(".svg") {
+            ("index.html", "text/html")
+        } else {
+            let owned: &'static str = Box::leak(format!("../icons/{safe}").into_boxed_str());
+            (owned, "image/svg+xml")
+        }
+    } else {
+        match path {
+            "/xterm.min.js" => ("xterm.min.js", "application/javascript"),
+            "/xterm.min.css" => ("xterm.min.css", "text/css"),
+            "/addon-fit.min.js" => ("addon-fit.min.js", "application/javascript"),
+            "/divider.html" => ("divider.html", "text/html"),
+            "/toolbar.html" => ("toolbar.html", "text/html"),
+            "/newtab.html" => ("newtab.html", "text/html"),
+            "/tabs.html" => ("tabs.html", "text/html"),
+            "/icons.css" => ("icons.css", "text/css"),
+            "/theme.css" => ("theme.css", "text/css"),
+            _ => ("index.html", "text/html"),
+        }
+    };
+    let bytes = std::fs::read(assets.join(file)).unwrap_or_default();
+    wry::http::Response::builder()
+        .header("content-type", mime)
+        .header("cache-control", "no-store")
+        .body(std::borrow::Cow::Owned(bytes))
+        .unwrap()
 }
 
 fn page_text_js() -> String {
@@ -312,22 +344,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let terminal = WebViewBuilder::new_with_web_context(&mut context)
         .with_bounds(rect(0, 0, TERMINAL_W, WINDOW_H))
         .with_custom_protocol("abterm".into(), move |_id, request| {
-            let (file, mime) = match request.uri().path() {
-                "/xterm.min.js" => ("xterm.min.js", "application/javascript"),
-                "/xterm.min.css" => ("xterm.min.css", "text/css"),
-                "/addon-fit.min.js" => ("addon-fit.min.js", "application/javascript"),
-                "/divider.html" => ("divider.html", "text/html"),
-                "/toolbar.html" => ("toolbar.html", "text/html"),
-                "/newtab.html" => ("newtab.html", "text/html"),
-                "/tabs.html" => ("tabs.html", "text/html"),
-                "/theme.css" => ("theme.css", "text/css"),
-                _ => ("index.html", "text/html"),
-            };
-            let bytes = std::fs::read(term_assets.join(file)).unwrap_or_default();
-            wry::http::Response::builder()
-                .header("content-type", mime)
-                .header("cache-control", "no-store")
-                .body(std::borrow::Cow::Owned(bytes)).unwrap()
+            serve_abterm(&term_assets, &request)
         })
         .with_url("http://abterm.localhost/index.html")
         .with_ipc_handler(move |request| {
@@ -376,13 +393,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let divider = WebViewBuilder::new_with_web_context(&mut context)
         .with_bounds(rect(TERMINAL_W, 0, DIVIDER_W, WINDOW_H))
         .with_custom_protocol("abterm".into(), move |_id, request| {
-            let is_css = request.uri().path() == "/theme.css";
-            let file = if is_css { "theme.css" } else { "divider.html" };
-            let bytes = std::fs::read(divider_assets.join(file)).unwrap_or_default();
-            wry::http::Response::builder()
-                .header("content-type", if is_css { "text/css" } else { "text/html" })
-                .header("cache-control", "no-store")
-                .body(std::borrow::Cow::Owned(bytes)).unwrap()
+            serve_abterm(&divider_assets, &request)
         })
         .with_url("http://abterm.localhost/divider.html")
         .with_ipc_handler(move |request| {
@@ -415,12 +426,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             .with_bounds(rect(TERMINAL_W + DIVIDER_W, TOOLBAR_H,
                 WINDOW_W - TERMINAL_W - DIVIDER_W - TAB_W, WINDOW_H - TOOLBAR_H))
             .with_custom_protocol("abterm".into(), move |_id, request| {
-                let file = if request.uri().path() == "/theme.css" { "theme.css" } else { "newtab.html" };
-                let bytes = std::fs::read(tab_assets.join(file)).unwrap_or_default();
-                wry::http::Response::builder()
-                    .header("content-type", if file == "theme.css" { "text/css" } else { "text/html" })
-                    .header("cache-control", "no-store")
-                    .body(std::borrow::Cow::Owned(bytes)).unwrap()
+                serve_abterm(&tab_assets, &request)
             })
             .with_url(url)
             .with_on_page_load_handler(move |_event, loaded| {
@@ -468,12 +474,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         .with_bounds(rect(TERMINAL_W + DIVIDER_W, 0,
             WINDOW_W - TERMINAL_W - DIVIDER_W - TAB_W, TOOLBAR_H))
         .with_custom_protocol("abterm".into(), move |_id, request| {
-            let file = if request.uri().path() == "/theme.css" { "theme.css" } else { "toolbar.html" };
-            let bytes = std::fs::read(toolbar_assets.join(file)).unwrap_or_default();
-            wry::http::Response::builder()
-                .header("content-type", if file == "theme.css" { "text/css" } else { "text/html" })
-                .header("cache-control", "no-store")
-                .body(std::borrow::Cow::Owned(bytes)).unwrap()
+            serve_abterm(&toolbar_assets, &request)
         })
         .with_url(&toolbar_url)
         .with_ipc_handler(move |request| {
@@ -494,13 +495,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let tab_strip = WebViewBuilder::new_with_web_context(&mut context)
         .with_bounds(rect(WINDOW_W - TAB_W, 0, TAB_W, WINDOW_H))
         .with_custom_protocol("abterm".into(), move |_id, request| {
-            let is_css = request.uri().path() == "/theme.css";
-            let file = if is_css { "theme.css" } else { "tabs.html" };
-            let bytes = std::fs::read(tabs_assets.join(file)).unwrap_or_default();
-            wry::http::Response::builder()
-                .header("content-type", if is_css { "text/css" } else { "text/html" })
-                .header("cache-control", "no-store")
-                .body(std::borrow::Cow::Owned(bytes)).unwrap()
+            serve_abterm(&tabs_assets, &request)
         })
         .with_url("http://abterm.localhost/tabs.html")
         .with_on_page_load_handler(move |_event, _url| {

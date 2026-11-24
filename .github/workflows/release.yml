@@ -62,7 +62,7 @@ jobs:
           } else {
             gh release create $tag --repo Shuash11/agent-browser --verify-tag `
               --title "Agent Browser $tag" `
-              --notes "Agent Browser $tag`n`n- Virtual agent cursor, four-tab strip, New Tab page, premium responsive UI`n- Embedded OpenCode terminal with draggable left/bottom dock`n- 10 MCP browser tools`n- Windows NSIS installer`n`nPrerequisites: Windows 11, WebView2, OpenCode on PATH, NVIDIA_API_KEY in environment." `
+              --notes "Agent Browser $tag`n`n- Lucide icons across the toolbar, tab strip, and New Tab shortcuts`n- Custom app icon in the installer and desktop/Start Menu shortcuts`n- macOS dark theme`n- Layout cache`n- Text tools`n- Tab close`n- Updater`n- Custom source`n`nPrerequisites: Windows 11, WebView2, OpenCode on PATH, NVIDIA_API_KEY in environment." `
               $asset
           }
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release step failed' }

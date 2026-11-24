@@ -25,7 +25,26 @@ $files = @(
   "assets/terminal/xterm.min.js",
   "assets/terminal/xterm.min.css",
   "assets/terminal/addon-fit.min.js",
-  "assets/terminal/LICENSE-xterm"
+  "assets/terminal/LICENSE",
+  "assets/terminal/LICENSE-xterm",
+  "assets/terminal/icons.css",
+  "assets/icons/LICENSE",
+  "assets/icons/arrow-left.svg",
+  "assets/icons/arrow-right.svg",
+  "assets/icons/rotate-cw.svg",
+  "assets/icons/house.svg",
+  "assets/icons/x.svg",
+  "assets/icons/plus.svg",
+  "assets/icons/globe.svg",
+  "assets/icons/circle-play.svg",
+  "assets/icons/app-window.svg",
+  "assets/icons/monitor.svg",
+  "assets/icons/download.svg",
+  "assets/icons/external-link.svg",
+  "assets/icons/panel-bottom.svg",
+  "assets/icons/panel-left.svg",
+  "assets/icons/search.svg",
+  "assets/app.ico"
 )
 foreach ($f in $files) {
   $src = Join-Path $root $f

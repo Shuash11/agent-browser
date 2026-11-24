@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Tabs</title>
 <link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="icons.css">
 <style>
   html, body { height:100%; }
   body { background:var(--surface-solid); border-left:1px solid var(--line); overflow:hidden; }
@@ -23,13 +24,15 @@
   .tab small { font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden;
                text-overflow:ellipsis; }
   .close { width:24px; min-height:44px; flex:none; padding:0; font-size:14px; border-radius:var(--radius-md); }
-  #new { margin:var(--space-2); width:calc(100% - 24px); min-height:28px; font-size:12px; }
+  #new { margin:var(--space-2); width:calc(100% - 24px); min-height:28px; font-size:12px;
+         display:flex; align-items:center; justify-content:center; gap:var(--space-2); }
+  .close .icon { width:12px; height:12px; }
 </style>
 </head>
 <body>
 <div id="head">Tabs</div>
 <div id="list"></div>
-<button id="new" aria-label="Open a new tab">+ New tab</button>
+<button id="new" aria-label="Open a new tab"><span class="icon i-plus"></span> New tab</button>
 <script>
   var list = document.getElementById('list');
   function send(kind, index) {
@@ -51,7 +54,7 @@
       tab.addEventListener('click', function () { send(closed[i] ? 'reopen' : 'focus', i); });
       var close = document.createElement('button');
       close.className = 'close';
-      close.textContent = closed[i] ? '·' : '×';
+      close.innerHTML = closed[i] ? '·' : '<span class="icon i-x"></span>';
       close.setAttribute('aria-label', 'Close tab ' + (i + 1));
       close.disabled = !!closed[i];
       close.addEventListener('click', function (e) { e.stopPropagation(); send('close', i); });

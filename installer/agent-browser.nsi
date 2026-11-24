@@ -5,6 +5,8 @@
 !define PUBLISHER "Shuash11"
 
 Name "${APPNAME} ${VERSION}"
+Icon "staging\assets\app.ico"
+UninstallIcon "staging\assets\app.ico"
 OutFile "output\AgentBrowser-Setup-${VERSION}.exe"
 InstallDir "$LOCALAPPDATA\Programs\Agent Browser"
 InstallDirRegKey HKCU "Software\AgentBrowser" "InstallDir"
@@ -23,8 +25,8 @@ Section "Install (required)" SEC01
   File /r "staging\*.*"
 
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
-  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\start-agent-browser.ps1"' "$INSTDIR\target\release\agent-browser.exe" 0
-  CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\start-agent-browser.ps1"' "$INSTDIR\target\release\agent-browser.exe" 0
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\start-agent-browser.ps1"' "$INSTDIR\assets\app.ico" 0
+  CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\start-agent-browser.ps1"' "$INSTDIR\assets\app.ico" 0
 
   WriteRegStr HKCU "Software\AgentBrowser" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgentBrowser" "DisplayName" "${APPNAME} ${VERSION}"
