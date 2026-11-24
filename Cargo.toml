@@ -1,6 +1,6 @@
 [package]
 name = "agent-browser"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Local browser panel controlled by OpenCode over MCP (personal use)"
 
@@ -15,7 +15,7 @@ rmcp = { version = "3.11.0", features = ["server", "macros", "schemars", "transp
 schemars = "1"
 tokio = { version = "1.54.1", features = ["full"] }
 url = "2"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
 portable-pty = "0.9.0"
 ureq = "3.5.2"
 sha2 = "0.11.1"

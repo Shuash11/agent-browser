@@ -95,8 +95,10 @@ impl Controller {
 
     fn focus_gui_window(&mut self) -> bool {
         use windows_sys::Win32::Foundation::HWND;
+        use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, GetForegroundWindow, SetForegroundWindow, ShowWindow, SW_RESTORE,
+            BringWindowToTop, FindWindowW, GetForegroundWindow,
+            GetWindowThreadProcessId, SetForegroundWindow, ShowWindow, SW_RESTORE,
         };
         let title: Vec<u16> = format!("{WINDOW_TITLE}\0").encode_utf16().collect();
         unsafe {
@@ -105,7 +107,17 @@ impl Controller {
                 return false;
             }
             ShowWindow(hwnd, SW_RESTORE);
+            let fg = GetForegroundWindow();
+            let fg_thread = GetWindowThreadProcessId(fg, std::ptr::null_mut());
+            let our_thread = GetCurrentThreadId();
+            let attached = fg_thread != 0
+                && fg_thread != our_thread
+                && AttachThreadInput(our_thread, fg_thread, 1) != 0;
+            BringWindowToTop(hwnd);
             SetForegroundWindow(hwnd);
+            if attached {
+                AttachThreadInput(our_thread, fg_thread, 0);
+            }
             GetForegroundWindow() == hwnd
         }
     }

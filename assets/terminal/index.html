@@ -35,6 +35,7 @@
   <strong>OpenCode</strong>
   <span class="sub">local PTY</span>
   <button id="update" aria-label="Check for updates">Updates</button>
+  <span class="sub" id="update-status" role="status" aria-live="polite"></span>
   <button id="dock" aria-label="Toggle terminal dock position" style="margin-left:auto">Dock: Left</button>
 </div>
 <div id="term"></div>
@@ -49,6 +50,9 @@
   document.querySelectorAll('.traffic button').forEach(function (b) {
     b.addEventListener('click', function () { send({ type: 'window_action', action: b.dataset.action }); });
   });
+  window.__setUpdateStatus = function (s) {
+    document.getElementById('update-status').textContent = s;
+  };
   window.onerror = function (m) { send({ type: 'jserror', message: String(m) }); };
 </script>
 <script src="xterm.min.js"></script>

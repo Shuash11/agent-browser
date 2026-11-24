@@ -105,10 +105,12 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 fn message_box(text: &str, caption: &str, flags: u32) -> i32 {
-    use windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW;
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, MessageBoxW};
     unsafe {
+        let owner: HWND = FindWindowW(std::ptr::null(), wide(crate::control::WINDOW_TITLE).as_ptr());
         MessageBoxW(
-            std::ptr::null_mut(),
+            owner,
             wide(text).as_ptr(),
             wide(caption).as_ptr(),
             flags,
@@ -1021,6 +1023,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 crate::ipc::UserEvent::LayoutDirty => { layout_cache.dirty = true; }
                 crate::ipc::UserEvent::UpdateCheck => {
                     let p = ui_proxy.clone();
+                    let _ = terminal.evaluate_script("window.__setUpdateStatus('Checking…')");
                     std::thread::spawn(move || {
                         let result = crate::updater::check_latest();
                         let _ = p.send_event(crate::ipc::UserEvent::UpdateChecked { result });
@@ -1029,29 +1032,34 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 crate::ipc::UserEvent::UpdateChecked { result } => {
                     use windows_sys::Win32::UI::WindowsAndMessaging::{
                         MB_ICONERROR, MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK,
-                        MB_SETFOREGROUND, MB_YESNOCANCEL,
+                        MB_SETFOREGROUND, MB_TOPMOST, MB_YESNOCANCEL,
                     };
                     match result {
                         Err(msg) => {
+                            let _ = terminal.evaluate_script("window.__setUpdateStatus('Check failed')");
                             message_box(
                                 &format!("Could not check for updates.\n\n{msg}"),
                                 "Agent Browser",
-                                MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
+                                MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TOPMOST,
                             );
                         }
                         Ok(None) => {
+                            let _ = terminal.evaluate_script("window.__setUpdateStatus('Up to date')");
                             message_box(
                                 "You are running the latest version.",
                                 "Agent Browser",
-                                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND,
+                                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST,
                             );
                         }
                         Ok(Some(info)) => {
+                            if let Ok(js) = serde_json::to_string(&format!("Update {} available", info.version)) {
+                                let _ = terminal.evaluate_script(&format!("window.__setUpdateStatus({js})"));
+                            }
                             if crate::updater::is_skipped(&root, &info.tag) {
                                 message_box(
                                     &format!("Update {} is available, but it was skipped.", info.version),
                                     "Agent Browser",
-                                    MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND,
+                                    MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST,
                                 );
                                 return;
                             }
@@ -1062,7 +1070,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                     info.version, notes
                                 ),
                                 "Agent Browser update",
-                                MB_YESNOCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND,
+                                MB_YESNOCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND | MB_TOPMOST,
                             );
                             if answer == 2 {
                                 crate::updater::skip(&root, &info.tag);
