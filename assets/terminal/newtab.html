@@ -7,7 +7,7 @@
 <style>
   html, body { height:100%; }
   body { display:flex; flex-direction:column; align-items:center; justify-content:center;
-         background:radial-gradient(circle at 50% 32%, #16243d 0%, var(--bg) 62%);
+         background:radial-gradient(circle at 50% 30%, #2c2c2e 0%, var(--bg) 65%);
          padding:var(--space-4); }
   .brand { color:var(--accent); font-size:12px; letter-spacing:.16em; text-transform:uppercase;
            font-weight:600; margin-bottom:var(--space-2); }
@@ -15,12 +15,13 @@
   .shortcuts { display:grid; grid-template-columns:repeat(4, 92px); gap:var(--space-2);
                justify-content:center; max-width:100%; }
   .chip { width:92px; height:76px; display:flex; flex-direction:column; align-items:center;
-          justify-content:center; gap:6px; }
+          justify-content:center; gap:6px; background:var(--surface-solid);
+          border:1px solid var(--line); border-radius:var(--radius-md); }
   .chip b { font-size:17px; font-weight:600; color:var(--text); }
   .chip span { font-size:11px; color:var(--muted); }
   .divider { width:min(560px, 90%); height:1px; background:var(--line); margin:var(--space-4) 0; }
   .custom { width:min(560px, 90%); display:flex; gap:var(--space-2); align-items:center; }
-  #src { flex:1; min-width:0; height:38px; padding:0 var(--space-3); background:var(--bg);
+  #src { flex:1; min-width:0; height:38px; padding:0 var(--space-3); background:var(--surface-raised);
          color:var(--text); border:1px solid var(--line); border-radius:var(--radius-sm);
          outline:0; font-family:var(--sans); font-size:12px; }
   #src:focus { border-color:var(--accent); }

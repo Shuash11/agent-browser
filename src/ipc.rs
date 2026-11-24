@@ -50,6 +50,8 @@ pub enum UserEvent {
     UpdateFailed { message: String },
     /// Page DOM changed; cached layout is stale.
     LayoutDirty,
+    /// Functional macOS-style window control.
+    WindowAction { action: String },
     /// A tab finished loading; used to sync the address bar and tab strip.
     PageLoaded { url: String, tab: usize },
 }

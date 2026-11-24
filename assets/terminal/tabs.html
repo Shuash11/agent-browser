@@ -13,16 +13,16 @@
   #list { padding:var(--space-2); display:flex; flex-direction:column; gap:var(--space-1); }
   .row { display:flex; gap:var(--space-1); width:100%; }
   .tab { flex:1; min-width:0; min-height:44px; padding:6px var(--space-2); text-align:left;
-         border:1px solid transparent; border-radius:var(--radius-sm); background:transparent;
+         border:1px solid transparent; border-radius:var(--radius-md); background:transparent;
          display:flex; flex-direction:column; gap:2px; overflow:hidden; }
-  .tab:hover { background:rgba(255,255,255,.04); }
+  .tab:hover { background:var(--surface-raised); }
   .tab.active { border-color:var(--accent); background:var(--accent-soft); }
   .tab.closed { opacity:.45; }
   .tab b { font-size:11px; color:var(--text); white-space:nowrap; overflow:hidden;
            text-overflow:ellipsis; font-weight:600; }
   .tab small { font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden;
                text-overflow:ellipsis; }
-  .close { width:24px; min-height:44px; flex:none; padding:0; font-size:14px; }
+  .close { width:24px; min-height:44px; flex:none; padding:0; font-size:14px; border-radius:var(--radius-md); }
   #new { margin:var(--space-2); width:calc(100% - 24px); min-height:28px; font-size:12px; }
 </style>
 </head>
@@ -48,18 +48,13 @@
       tab.innerHTML = '<b></b><small></small>';
       tab.querySelector('b').textContent = (closed[i] ? '↺ ' : '') + (title || ('Tab ' + (i + 1)));
       tab.querySelector('small').textContent = closed[i] ? 'closed — reopen' : (urls[i] || '');
-      tab.addEventListener('click', function () {
-        send(closed[i] ? 'reopen' : 'focus', i);
-      });
+      tab.addEventListener('click', function () { send(closed[i] ? 'reopen' : 'focus', i); });
       var close = document.createElement('button');
       close.className = 'close';
       close.textContent = closed[i] ? '·' : '×';
       close.setAttribute('aria-label', 'Close tab ' + (i + 1));
       close.disabled = !!closed[i];
-      close.addEventListener('click', function (e) {
-        e.stopPropagation();
-        send('close', i);
-      });
+      close.addEventListener('click', function (e) { e.stopPropagation(); send('close', i); });
       row.appendChild(tab);
       row.appendChild(close);
       list.appendChild(row);

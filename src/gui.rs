@@ -116,6 +116,26 @@ fn message_box(text: &str, caption: &str, flags: u32) -> i32 {
     }
 }
 
+fn window_command(action: &str) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, IsZoomed, ShowWindow, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE,
+    };
+    let title = wide(crate::control::WINDOW_TITLE);
+    unsafe {
+        let hwnd: HWND = FindWindowW(std::ptr::null(), title.as_ptr());
+        if hwnd.is_null() { return; }
+        match action {
+            "minimize" => { ShowWindow(hwnd, SW_MINIMIZE); }
+            "maximize" => {
+                if IsZoomed(hwnd) != 0 { ShowWindow(hwnd, SW_RESTORE); }
+                else { ShowWindow(hwnd, SW_MAXIMIZE); }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn page_text_js() -> String {
     "(function(){return JSON.stringify({title:document.title,url:location.href,\
      text:(document.body&&document.body.innerText||'').slice(0,8000)});})()".to_string()
@@ -336,6 +356,13 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Some("update_check") => {
                         let _ = term_proxy_ipc.send_event(crate::ipc::UserEvent::UpdateCheck);
+                    }
+                    Some("window_action") => {
+                        if let Some(action) = msg.get("action").and_then(|v| v.as_str()) {
+                            let _ = term_proxy_ipc.send_event(crate::ipc::UserEvent::WindowAction {
+                                action: action.to_string(),
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -987,6 +1014,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         converted.get(0).and_then(|v| v.as_str()).unwrap_or("").to_string()
                     };
                     let _ = reply.send(crate::protocol::Response::Text { text: output });
+                }
+                crate::ipc::UserEvent::WindowAction { action } => {
+                    if action == "close" {
+                        session.terminate();
+                        *control_flow = ControlFlow::Exit;
+                    } else {
+                        window_command(&action);
+                    }
                 }
                 crate::ipc::UserEvent::LayoutDirty => { layout_cache.dirty = true; }
                 crate::ipc::UserEvent::UpdateCheck => {

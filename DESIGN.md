@@ -1,7 +1,7 @@
 # Agent Browser — design specification (v0.2)
 
 ## Direction
-Dark graphite with a single cyan accent. Restrained translucency on chrome surfaces only (toolbar, terminal header), never on content pages. Purpose: a professional operator tool where the page stays the visual focus and the chrome recedes.
+macOS dark-mode-inspired: neutral graphite surfaces (#1e1e1e / #2c2c2e), system-blue accent (#0A84FF), rounded 10px controls, subtle borders and restrained shadows. Traffic-light buttons in the terminal header are functional close/minimize/maximize controls, not decoration. Chrome recedes so the page remains the visual focus.
 
 ## Product context
 Two roles in one window:
