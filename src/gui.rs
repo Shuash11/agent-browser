@@ -507,13 +507,19 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let mut titles = vec!["New Tab".to_string(), "Fixture".to_string(),
                           "New Tab".to_string(), "New Tab".to_string()];
     let mut urls = tab_urls.clone();
-    let refresh_tabs = |tabs_w: &wry::WebView, titles: &Vec<String>, urls: &Vec<String>, active: usize| {
-        if let (Ok(t), Ok(u)) = (serde_json::to_string(titles), serde_json::to_string(urls)) {
-            let _ = tabs_w.evaluate_script(&format!("window.__setTabs({t},{u},{active})"));
+    let mut closed = vec![false; tabs.len()];
+    let refresh_tabs = |tabs_w: &wry::WebView, titles: &Vec<String>, urls: &Vec<String>,
+                        active: usize, closed: &Vec<bool>| {
+        if let (Ok(t), Ok(u), Ok(c)) = (
+            serde_json::to_string(titles),
+            serde_json::to_string(urls),
+            serde_json::to_string(closed),
+        ) {
+            let _ = tabs_w.evaluate_script(&format!("window.__setTabs({t},{u},{active},{c})"));
         }
     };
     for (i, tab) in tabs.iter().enumerate() { tab.set_visible(i == 0).ok(); }
-    refresh_tabs(&tab_strip, &titles, &urls, active);
+    refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
     println!("GUI ready: root={}; {} tabs, page viewport {:?}", root.display(), tabs.len(), viewport);
 
     let mut term_ready = false;
@@ -578,18 +584,43 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         controller.log_command(&cmd, true);
                         let list: Vec<crate::protocol::TabInfo> = titles.iter()
                             .zip(urls.iter()).enumerate()
+                            .filter(|(i, _)| !closed[*i])
                             .map(|(i, (t, u))| crate::protocol::TabInfo {
                                 index: i, title: t.clone(), url: u.clone(), active: i == active,
                             }).collect();
                         let _ = reply.send(crate::protocol::Response::Tabs { tabs: list });
                         return;
                     }
+                    if let crate::protocol::Command::CloseTab { index } = &cmd {
+                        let valid = *index < tabs.len() && !closed[*index]
+                            && closed.iter().filter(|c| !**c).count() > 1;
+                        controller.log_command(&cmd, valid);
+                        if !valid {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "cannot close that tab (out of range, already closed, or last tab)".into(),
+                            });
+                            return;
+                        }
+                        closed[*index] = true;
+                        tabs[*index].set_visible(false).ok();
+                        if active == *index {
+                            if let Some(next) = closed.iter().position(|c| !c) {
+                                active = activate_tab(next, &tabs, &toolbar, &urls);
+                            }
+                        }
+                        layout_cache.dirty = true;
+                        refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
+                        let _ = reply.send(crate::protocol::Response::Ok {
+                            message: format!("closed tab {}", *index),
+                        });
+                        return;
+                    }
                     if let crate::protocol::Command::FocusTab { index } = &cmd {
-                        controller.log_command(&cmd, *index < tabs.len());
-                        if *index < tabs.len() {
+                        controller.log_command(&cmd, *index < tabs.len() && !closed[*index]);
+                        if *index < tabs.len() && !closed[*index] {
                             active = activate_tab(*index, &tabs, &toolbar, &urls);
                             layout_cache.dirty = true;
-                            refresh_tabs(&tab_strip, &titles, &urls, active);
+                            refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
                             let _ = reply.send(crate::protocol::Response::Ok {
                                 message: format!("focused tab {active}"),
                             });
@@ -810,7 +841,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             Url::parse(&url).ok().and_then(|u| u.host_str().map(|h| h.to_string()))
                                 .unwrap_or_else(|| url.clone())
                         };
-                        refresh_tabs(&tab_strip, &titles, &urls, active);
+                        refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
                         if tab == active {
                             if let Ok(js) = serde_json::to_string(&url) {
                                 let _ = toolbar.evaluate_script(&format!("window.__setUrl({js})"));
@@ -820,20 +851,50 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 crate::ipc::UserEvent::TabAction { kind, index } => match kind.as_str() {
                     "focus" => {
-                        if let Some(i) = index.filter(|i| *i < tabs.len()) {
+                        if let Some(i) = index.filter(|i| *i < tabs.len() && !closed[*i]) {
                             active = activate_tab(i, &tabs, &toolbar, &urls);
                             layout_cache.dirty = true;
-                            refresh_tabs(&tab_strip, &titles, &urls, active);
+                            refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
+                        }
+                    }
+                    "close" => {
+                        if let Some(i) = index.filter(|i| *i < tabs.len() && !closed[*i]) {
+                            if closed.iter().filter(|c| !**c).count() <= 1 { return; }
+                            closed[i] = true;
+                            tabs[i].set_visible(false).ok();
+                            if active == i {
+                                if let Some(next) = closed.iter().position(|c| !c) {
+                                    active = activate_tab(next, &tabs, &toolbar, &urls);
+                                }
+                            }
+                            layout_cache.dirty = true;
+                            refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
+                        }
+                    }
+                    "reopen" => {
+                        if let Some(i) = index.filter(|i| *i < tabs.len() && closed[*i]) {
+                            closed[i] = false;
+                            let _ = tabs[i].load_url(newtab_url);
+                            urls[i] = newtab_url.to_string();
+                            titles[i] = "New Tab".into();
+                            active = activate_tab(i, &tabs, &toolbar, &urls);
+                            layout_cache.dirty = true;
+                            refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
                         }
                     }
                     "newtab" => {
-                        let next = (active + 1) % tabs.len();
+                        let next = if let Some(i) = closed.iter().position(|c| *c) {
+                            i
+                        } else {
+                            (active + 1) % tabs.len()
+                        };
+                        closed[next] = false;
                         let _ = tabs[next].load_url(newtab_url);
                         urls[next] = newtab_url.to_string();
                         titles[next] = "New Tab".into();
                         active = activate_tab(next, &tabs, &toolbar, &urls);
                         layout_cache.dirty = true;
-                        refresh_tabs(&tab_strip, &titles, &urls, active);
+                        refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
                     }
                     _ => {}
                 },
@@ -1025,7 +1086,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 crate::ipc::UserEvent::TabsReady => {
-                    refresh_tabs(&tab_strip, &titles, &urls, active);
+                    refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
                 }
                 crate::ipc::UserEvent::SetDock { mode } => {
                     dock = if mode == "toggle" {

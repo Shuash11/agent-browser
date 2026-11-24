@@ -11,15 +11,18 @@
           border-bottom:1px solid var(--line); color:var(--muted); font-size:11px;
           text-transform:uppercase; letter-spacing:.08em; }
   #list { padding:var(--space-2); display:flex; flex-direction:column; gap:var(--space-1); }
-  .tab { width:100%; min-height:44px; padding:6px var(--space-2); text-align:left;
+  .row { display:flex; gap:var(--space-1); width:100%; }
+  .tab { flex:1; min-width:0; min-height:44px; padding:6px var(--space-2); text-align:left;
          border:1px solid transparent; border-radius:var(--radius-sm); background:transparent;
          display:flex; flex-direction:column; gap:2px; overflow:hidden; }
   .tab:hover { background:rgba(255,255,255,.04); }
   .tab.active { border-color:var(--accent); background:var(--accent-soft); }
+  .tab.closed { opacity:.45; }
   .tab b { font-size:11px; color:var(--text); white-space:nowrap; overflow:hidden;
            text-overflow:ellipsis; font-weight:600; }
   .tab small { font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden;
                text-overflow:ellipsis; }
+  .close { width:24px; min-height:44px; flex:none; padding:0; font-size:14px; }
   #new { margin:var(--space-2); width:calc(100% - 24px); min-height:28px; font-size:12px; }
 </style>
 </head>
@@ -29,24 +32,40 @@
 <button id="new" aria-label="Open a new tab">+ New tab</button>
 <script>
   var list = document.getElementById('list');
-  window.__setTabs = function (titles, urls, active) {
+  function send(kind, index) {
+    var msg = { type: kind };
+    if (index !== undefined) msg.index = index;
+    window.chrome.webview.postMessage(JSON.stringify(msg));
+  }
+  window.__setTabs = function (titles, urls, active, closed) {
     list.innerHTML = '';
     titles.forEach(function (title, i) {
-      var b = document.createElement('button');
-      b.className = 'tab' + (i === active ? ' active' : '');
-      b.setAttribute('aria-label', 'Tab ' + (i + 1) + ': ' + title);
-      b.innerHTML = '<b></b><small></small>';
-      b.querySelector('b').textContent = title || ('Tab ' + (i + 1));
-      b.querySelector('small').textContent = urls[i] || '';
-      b.addEventListener('click', function () {
-        window.chrome.webview.postMessage(JSON.stringify({ type: 'focus', index: i }));
+      var row = document.createElement('div');
+      row.className = 'row';
+      var tab = document.createElement('button');
+      tab.className = 'tab' + (i === active ? ' active' : '') + (closed[i] ? ' closed' : '');
+      tab.setAttribute('aria-label', 'Tab ' + (i + 1) + ': ' + title);
+      tab.innerHTML = '<b></b><small></small>';
+      tab.querySelector('b').textContent = (closed[i] ? '↺ ' : '') + (title || ('Tab ' + (i + 1)));
+      tab.querySelector('small').textContent = closed[i] ? 'closed — reopen' : (urls[i] || '');
+      tab.addEventListener('click', function () {
+        send(closed[i] ? 'reopen' : 'focus', i);
       });
-      list.appendChild(b);
+      var close = document.createElement('button');
+      close.className = 'close';
+      close.textContent = closed[i] ? '·' : '×';
+      close.setAttribute('aria-label', 'Close tab ' + (i + 1));
+      close.disabled = !!closed[i];
+      close.addEventListener('click', function (e) {
+        e.stopPropagation();
+        send('close', i);
+      });
+      row.appendChild(tab);
+      row.appendChild(close);
+      list.appendChild(row);
     });
   };
-  document.getElementById('new').addEventListener('click', function () {
-    window.chrome.webview.postMessage(JSON.stringify({ type: 'newtab' }));
-  });
+  document.getElementById('new').addEventListener('click', function () { send('newtab'); });
 </script>
 </body>
 </html>

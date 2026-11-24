@@ -22,7 +22,7 @@ Use the MCP tools provided by the `agent-browser` server:
 - `browser_scroll_into_view {text}` — jump to a known element by its visible text; `browser_scroll_dom {dx,dy}` for pixel scrolling.
 - `browser_get_viewport` — physical-screen rectangle of the page area
 - `browser_move`, `browser_click`, `browser_scroll`, `browser_type`, `browser_key`
-- `browser_list_tabs`, `browser_focus_tab`
+- `browser_list_tabs`, `browser_focus_tab`, `browser_close_tab {index}` — switch or close tabs; the last open tab cannot be closed.
 - `browser_dock` — dock the terminal left or bottom when the user asks
 - `browser_screenshot` — capture the page viewport to a PNG path. Use **only** to verify visual state or for canvas/images/rendering problems; do not use it just to locate buttons or read text. Screenshots cost far more tokens than text.
 

@@ -57,6 +57,8 @@ pub enum Command {
     ClickId { id: String },
     /// Type into an element by its cached layout ID.
     TypeId { id: String, text: String },
+    /// Close a tab by its stable index.
+    CloseTab { index: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

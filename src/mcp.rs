@@ -175,6 +175,14 @@ impl BrowserService {
         pack(ipc::call(Command::ListTabs).await)
     }
 
+    #[tool(description = "Close a tab by index. Cannot close the last open tab.")]
+    async fn browser_close_tab(
+        &self,
+        Parameters(p): Parameters<IndexParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::CloseTab { index: p.index }).await)
+    }
+
     #[tool(description = "Focus an existing tab by index. Does not create tabs.")]
     async fn browser_focus_tab(
         &self,

@@ -81,6 +81,7 @@ impl Controller {
             Command::Layout { .. } => "layout",
             Command::ClickId { .. } => "click_id",
             Command::TypeId { .. } => "type_id",
+            Command::CloseTab { .. } => "close_tab",
         };
         let line = format!("{{\"ts\":{ts},\"action\":\"{name}\",\"ok\":{ok}}}\n");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -236,7 +237,8 @@ impl Controller {
             Command::Dock { .. } => Response::Ok { message: "dock requested".into() },
             Command::PageText | Command::PageElements | Command::ScrollDom { .. }
             | Command::ScrollIntoView { .. } | Command::Layout { .. }
-            | Command::ClickId { .. } | Command::TypeId { .. } => Response::Error {
+            | Command::ClickId { .. } | Command::TypeId { .. }
+            | Command::CloseTab { .. } => Response::Error {
                 message: "page query must be handled by the GUI event loop".into(),
             },
         };

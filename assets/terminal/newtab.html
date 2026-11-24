@@ -12,18 +12,21 @@
   .brand { color:var(--accent); font-size:12px; letter-spacing:.16em; text-transform:uppercase;
            font-weight:600; margin-bottom:var(--space-2); }
   .sub { color:var(--muted); font-size:12px; margin-bottom:var(--space-4); }
-  .shortcuts { display:grid; grid-template-columns:repeat(5, 92px); gap:var(--space-2);
+  .shortcuts { display:grid; grid-template-columns:repeat(4, 92px); gap:var(--space-2);
                justify-content:center; max-width:100%; }
   .chip { width:92px; height:76px; display:flex; flex-direction:column; align-items:center;
           justify-content:center; gap:6px; }
   .chip b { font-size:17px; font-weight:600; color:var(--text); }
   .chip span { font-size:11px; color:var(--muted); }
-  .divider { width:min(520px, 90%); height:1px; background:var(--line); margin:var(--space-4) 0; }
-  .download { min-width:240px; min-height:48px; padding:10px var(--space-4);
-              border-color:var(--accent); color:var(--accent); display:flex;
-              flex-direction:column; align-items:center; gap:2px; }
-  .download b { font-size:13px; }
-  .download small { font-size:10px; color:var(--muted); }
+  .divider { width:min(560px, 90%); height:1px; background:var(--line); margin:var(--space-4) 0; }
+  .custom { width:min(560px, 90%); display:flex; gap:var(--space-2); align-items:center; }
+  #src { flex:1; min-width:0; height:38px; padding:0 var(--space-3); background:var(--bg);
+         color:var(--text); border:1px solid var(--line); border-radius:var(--radius-sm);
+         outline:0; font-family:var(--sans); font-size:12px; }
+  #src:focus { border-color:var(--accent); }
+  #openSrc { min-height:38px; padding:0 var(--space-3); border-color:var(--accent);
+             color:var(--accent); font-size:12px; }
+  .note { color:var(--muted); font-size:10px; margin-top:var(--space-2); }
   @media (max-width:520px) {
     .shortcuts { grid-template-columns:repeat(3, 84px); }
     .chip { width:84px; height:70px; }
@@ -40,20 +43,33 @@
   <button class="chip" data-url="https://www.facebook.com"><b>f</b><span>Facebook</span></button>
   <button class="chip" data-url="https://www.instagram.com"><b>IG</b><span>Instagram</span></button>
   <button class="chip" data-url="https://github.com"><b>GH</b><span>GitHub</span></button>
+  <button class="chip" data-url="https://www.microsoft.com/edge"><b>E</b><span>Edge</span></button>
+  <button class="chip" data-url="https://www.google.com/chrome"><b>C</b><span>Chrome</span></button>
 </div>
 
 <div class="divider"></div>
-<button class="download" data-url="https://www.youtube.com/premium">
-  <b>Video downloads</b>
-  <small>YouTube Premium — official</small>
-</button>
+<div class="custom">
+  <input id="src" aria-label="Your authorized download URL" placeholder="Paste your authorized download URL" spellcheck="false">
+  <button id="openSrc" aria-label="Open your download source">Open source</button>
+</div>
+<div class="note">Your link is stored only in this browser profile. Use sources you own or are authorized to download from.</div>
 
 <script>
   function go(url) {
+    if (!/^https?:\/\//i.test(url)) { url = 'https://' + url; }
     window.chrome.webview.postMessage(JSON.stringify({ type: 'navigate', url: url }));
   }
   document.querySelectorAll('[data-url]').forEach(function (b) {
     b.addEventListener('click', function () { go(b.getAttribute('data-url')); });
+  });
+  var input = document.getElementById('src');
+  input.value = localStorage.getItem('ab_download_source') || '';
+  input.addEventListener('change', function () {
+    localStorage.setItem('ab_download_source', input.value.trim());
+  });
+  document.getElementById('openSrc').addEventListener('click', function () {
+    localStorage.setItem('ab_download_source', input.value.trim());
+    if (input.value.trim()) { go(input.value.trim()); }
   });
 </script>
 </body>
