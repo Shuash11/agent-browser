@@ -6,5 +6,5 @@
 /analysis*.png
 /installer/staging/
 /installer/output/
-/installer/test-install/
+/installer/test-install*/
 *.log

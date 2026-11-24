@@ -10,6 +10,8 @@ use wry::WebView;
 
 use crate::protocol::{action_point, Command, MouseButton, Response, Viewport};
 
+pub const WINDOW_TITLE: &str = "Agent Browser — embedded OpenCode";
+
 pub struct Controller {
     viewport: Viewport,
     log_path: PathBuf,
@@ -32,19 +34,31 @@ impl Controller {
 
     /// Build the in-page check. The result is delivered through a WebView2
     /// callback, which must NOT be awaited on the tao UI thread (deadlock).
+    /// Fail closed: any unknown/iframe/shadow target is treated as sensitive.
+    /// Coordinates are physical screen pixels relative to the viewport, so the
+    /// page converts them with devicePixelRatio before calling elementFromPoint.
     pub fn password_check_js(relative: Option<(i32, i32)>) -> String {
         match relative {
             Some((x, y)) => format!(
-                "(function(){{var e=document.elementFromPoint({x},{y});\
-                 return !!(e&&e.tagName==='INPUT'&&e.type==='password');}})()"
+                "(function(){{var d=window.devicePixelRatio||1;\
+                 var e=document.elementFromPoint({x}/d,{y}/d);\
+                 if(!e)return true;\
+                 if(e.tagName==='IFRAME'||e.shadowRoot)return true;\
+                 if(window.__abClosedHosts&&window.__abClosedHosts.has(e))return true;\
+                 if(e.tagName.indexOf('-')>=0)return true;\
+                 return !!(e.closest&&e.closest('input[type=password]'));}})()"
             ),
             None => "(function(){var e=document.activeElement;\
-                      return !!(e&&e.tagName==='INPUT'&&e.type==='password');})()"
+                      if(!e)return true;\
+                      if(e.tagName==='IFRAME'||e.shadowRoot)return true;\
+                      if(window.__abClosedHosts&&window.__abClosedHosts.has(e))return true;\
+                      if(e.tagName.indexOf('-')>=0)return true;\
+                      return !!(e.tagName==='INPUT'&&e.type==='password');})()"
                 .to_string(),
         }
     }
 
-    fn log(&self, cmd: &Command, ok: bool) {
+    pub fn log_command(&self, cmd: &Command, ok: bool) {
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis())
@@ -71,18 +85,20 @@ impl Controller {
         }
     }
 
-    fn focus_gui_window(&mut self) {
+    fn focus_gui_window(&mut self) -> bool {
         use windows_sys::Win32::Foundation::HWND;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE,
+            FindWindowW, GetForegroundWindow, SetForegroundWindow, ShowWindow, SW_RESTORE,
         };
-        let title: Vec<u16> = "Agent Browser — personal automation\0".encode_utf16().collect();
+        let title: Vec<u16> = format!("{WINDOW_TITLE}\0").encode_utf16().collect();
         unsafe {
             let hwnd: HWND = FindWindowW(std::ptr::null(), title.as_ptr());
-            if !hwnd.is_null() {
-                ShowWindow(hwnd, SW_RESTORE);
-                SetForegroundWindow(hwnd);
+            if hwnd.is_null() {
+                return false;
             }
+            ShowWindow(hwnd, SW_RESTORE);
+            SetForegroundWindow(hwnd);
+            GetForegroundWindow() == hwnd
         }
     }
 
@@ -91,11 +107,22 @@ impl Controller {
         // Bring our window forward so injected input and screen capture target
         // it rather than whatever the user had focused.
         let _ = webview.focus();
-        self.focus_gui_window();
+        let foreground_ok = self.focus_gui_window();
+        let is_input = matches!(
+            cmd,
+            Command::Move { .. } | Command::Click { .. } | Command::Scroll { .. }
+                | Command::Type { .. } | Command::Key { .. }
+        );
+        if is_input && !foreground_ok {
+            self.log_command(cmd, false);
+            return Response::Error {
+                message: "Agent Browser is not foreground; bring it to the front".into(),
+            };
+        }
         // Hard scope: every coordinate action must land inside the page viewport.
         if let Some((x, y)) = action_point(cmd) {
             if !self.viewport.contains(x, y) {
-                self.log(cmd, false);
+                self.log_command(cmd, false);
                 return Response::Error {
                     message: format!(
                         "point ({x},{y}) is outside the content viewport {:?}",
@@ -203,7 +230,7 @@ impl Controller {
         };
 
         let ok = !matches!(response, Response::Error { .. });
-        self.log(cmd, ok);
+        self.log_command(cmd, ok);
         response
     }
 

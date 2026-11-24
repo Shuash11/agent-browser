@@ -9,40 +9,61 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Create GitHub release
+
+      - name: Verify version matches tag
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}".Substring(1)
+          $cargo = Get-Content Cargo.toml -Raw
+          if ($cargo -notmatch ('version = "' + $version + '"')) { throw "Cargo.toml version does not match tag $version" }
+          cargo test --locked
+          cargo build --release --locked
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $tooling = Join-Path $pwd 'tooling'
+          New-Item -ItemType Directory -Force -Path $tooling | Out-Null
+          curl.exe -L -sS -f -o (Join-Path $tooling 'nsis-setup.exe') 'https://prdownloads.sourceforge.net/nsis/nsis-3.13-setup.exe?download'
+          $nsisDir = Join-Path $tooling 'nsis'
+          Start-Process -FilePath (Join-Path $tooling 'nsis-setup.exe') -ArgumentList '/S', "/D=$nsisDir" -Wait
+          if (-not (Test-Path (Join-Path $nsisDir 'makensis.exe'))) { throw 'NSIS install failed' }
+
+      - name: Stage and build installer
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}".Substring(1)
+          & .\installer\stage.ps1 -Version $version
+          Push-Location installer
+          New-Item -ItemType Directory -Force -Path output | Out-Null
+          & ..\tooling\nsis\makensis.exe "/DVERSION=$version" agent-browser.nsi
+          Pop-Location
+          $asset = "installer\output\AgentBrowser-Setup-$version.exe"
+          if (-not (Test-Path $asset)) { throw "Installer not produced: $asset" }
+          Get-Item $asset | Select-Object FullName, Length
+
+      - name: Create release and upload installer
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          tag="${GITHUB_REF_NAME}"
-          if gh release view "$tag" --repo Shuash11/agent-browser >/dev/null 2>&1; then
-            echo "Release $tag already exists; leaving it unchanged."
-            exit 0
-          fi
-
-          gh release create "$tag" \
-            --repo Shuash11/agent-browser \
-            --verify-tag \
-            --title "Agent Browser $tag" \
-            --notes "$(cat <<'EOF'
-          ## Agent Browser v0.1.0
-
-          - Embedded OpenCode terminal
-          - Draggable left/bottom dock
-          - 10 MCP browser tools
-          - Dark graphite UI
-          - NSIS installer
-
-          ### Prerequisites
-
-          - Windows 11
-          - WebView2
-          - OpenCode available on PATH
-          - `NVIDIA_API_KEY` set in the environment for the model
-          EOF
-          )"
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.Substring(1)
+          $asset = "installer\output\AgentBrowser-Setup-$version.exe"
+          gh release view $tag --repo Shuash11/agent-browser 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists; uploading asset only."
+            gh release upload $tag $asset --repo Shuash11/agent-browser --clobber
+          } else {
+            gh release create $tag --repo Shuash11/agent-browser --verify-tag `
+              --title "Agent Browser $tag" `
+              --notes "Agent Browser $tag`n`n- Virtual agent cursor, four-tab strip, New Tab page, premium responsive UI`n- Embedded OpenCode terminal with draggable left/bottom dock`n- 10 MCP browser tools`n- Windows NSIS installer`n`nPrerequisites: Windows 11, WebView2, OpenCode on PATH, NVIDIA_API_KEY in environment." `
+              $asset
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release step failed' }
+          gh release view $tag --repo Shuash11/agent-browser --json tagName,assets,url

@@ -99,9 +99,15 @@ impl BrowserService {
         Parameters(p): Parameters<ClickParams>,
     ) -> Result<String, McpError> {
         let button = match p.button.to_lowercase().as_str() {
+            "left" => MouseButton::Left,
             "right" => MouseButton::Right,
             "middle" => MouseButton::Middle,
-            _ => MouseButton::Left,
+            other => {
+                return Err(McpError::invalid_params(
+                    format!("button must be left, right, or middle; got {other}"),
+                    None,
+                ))
+            }
         };
         pack(ipc::call(Command::Click { x: p.x, y: p.y, button }).await)
     }
@@ -159,6 +165,8 @@ impl BrowserService {
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let service = BrowserService.serve(stdio()).await?;
-    service.waiting().await?;
+    // A stdio client disconnect is normal when OpenCode reloads tools.
+    // Do not turn it into a non-zero process exit (reported as code 255).
+    let _ = service.waiting().await;
     Ok(())
 }
