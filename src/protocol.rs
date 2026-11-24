@@ -43,6 +43,14 @@ pub enum Command {
     GetViewport,
     /// Dock the terminal panel left or bottom (or toggle).
     Dock { mode: String },
+    /// Visible page text as plain text (cheaper than a screenshot).
+    PageText,
+    /// Visible interactive elements with screen-space centres.
+    PageElements,
+    /// Scroll the document with JS pixels instead of OS wheel ticks.
+    ScrollDom { dx: i32, dy: i32 },
+    /// Scroll an element containing the given text into view.
+    ScrollIntoView { text: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -52,6 +60,8 @@ pub enum Response {
     Screenshot { path: String, width: u32, height: u32 },
     Tabs { tabs: Vec<TabInfo> },
     Viewport { viewport: Viewport },
+    /// Text result from a page query (JSON string for structured results).
+    Text { text: String },
     Error { message: String },
 }
 

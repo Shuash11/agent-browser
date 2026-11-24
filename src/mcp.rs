@@ -64,8 +64,17 @@ pub struct DockParams {
     pub mode: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ScrollDomParams {
+    /// Horizontal pixels; positive scrolls right.
+    pub dx: i32,
+    /// Vertical pixels; positive scrolls down.
+    pub dy: i32,
+}
+
 fn pack(r: Result<Response, String>) -> Result<String, McpError> {
     match r {
+        Ok(Response::Text { text }) => Ok(text),
         Ok(resp) => serde_json::to_string(&resp)
             .map_err(|e| McpError::internal_error(e.to_string(), None)),
         Err(msg) => Err(McpError::internal_error(msg, None)),
@@ -152,6 +161,32 @@ impl BrowserService {
         Parameters(p): Parameters<IndexParams>,
     ) -> Result<String, McpError> {
         pack(ipc::call(Command::FocusTab { index: p.index }).await)
+    }
+
+    #[tool(description = "Read the active page as plain text (title, URL, visible text). Cheaper than a screenshot.")]
+    async fn browser_page_text(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::PageText).await)
+    }
+
+    #[tool(description = "List visible interactive elements with labels and screen-space click coordinates.")]
+    async fn browser_page_elements(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::PageElements).await)
+    }
+
+    #[tool(description = "Scroll the page by pixels using JS. Positive dy scrolls down.")]
+    async fn browser_scroll_dom(
+        &self,
+        Parameters(p): Parameters<ScrollDomParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::ScrollDom { dx: p.dx, dy: p.dy }).await)
+    }
+
+    #[tool(description = "Scroll an element containing the given text into the centre of view.")]
+    async fn browser_scroll_into_view(
+        &self,
+        Parameters(p): Parameters<TextParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::ScrollIntoView { text: p.text }).await)
     }
 
     #[tool(description = "Dock the terminal panel left or bottom (or toggle).")]

@@ -34,6 +34,13 @@ pub enum UserEvent {
     TabAction { kind: String, index: Option<usize> },
     /// Tab strip page finished loading; safe to inject the tab list.
     TabsReady,
+    /// Result of a page text/element/scroll query.
+    PageQueryResult {
+        kind: String,
+        text: String,
+        reply: oneshot::Sender<Response>,
+        tab: usize,
+    },
     /// A tab finished loading; used to sync the address bar and tab strip.
     PageLoaded { url: String, tab: usize },
 }

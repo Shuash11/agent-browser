@@ -70,6 +70,44 @@ window.__abCursor=null;
     )
 }
 
+fn page_text_js() -> String {
+    "(function(){return JSON.stringify({title:document.title,url:location.href,\
+     text:(document.body&&document.body.innerText||'').slice(0,8000)});})()".to_string()
+}
+
+fn page_elements_js() -> String {
+    "(function(){var out=[];var els=document.querySelectorAll(\
+     'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[onclick]');\
+     for(var i=0;i<els.length;i++){var e=els[i];var r=e.getBoundingClientRect();\
+     if(r.width<2||r.height<2||r.bottom<0||r.top>window.innerHeight)continue;\
+     var s=getComputedStyle(e);if(s.visibility==='hidden'||s.display==='none'||s.opacity==='0')continue;\
+     var label=(e.innerText||e.value||e.getAttribute('aria-label')||e.placeholder||'');\
+     out.push({tag:e.tagName,role:e.getAttribute('role')||'',\
+     label:String(label).trim().slice(0,100),\
+     x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),\
+     w:Math.round(r.width),h:Math.round(r.height)});\
+     if(out.length>=120)break;}\
+     return JSON.stringify({innerWidth:window.innerWidth,innerHeight:window.innerHeight,elements:out});})()"
+        .to_string()
+}
+
+fn scroll_into_view_js(text: &str) -> String {
+    let needle = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        "(function(){{var n={needle};var needle=n.toLowerCase().slice(1,-1);\
+         var els=document.querySelectorAll('button,a,input,textarea,select,[role=button],[role=link],h1,h2,h3,h4,h5,h6,li,td,th,label,p,span');\
+         var best=null,bestArea=Infinity,bestText='';\
+         for(var i=0;i<els.length;i++){{var e=els[i];\
+         var t=(e.innerText||e.value||e.getAttribute('aria-label')||'').trim();\
+         if(!t||t.toLowerCase().indexOf(needle)<0)continue;\
+         var r=e.getBoundingClientRect();var area=r.width*r.height;\
+         if(area>0&&area<bestArea){{best=e;bestArea=area;bestText=t.slice(0,120);}}}}\
+         if(best){{best.scrollIntoView({{block:'center',behavior:'instant'}});\
+         return JSON.stringify({{found:true,text:bestText}});}}\
+         return JSON.stringify({{found:false,text:n}});}})()"
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn layout_bounds(
     dock: &str,
@@ -517,6 +555,46 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let fy = (y - v.y) as f64 / v.height.max(1) as f64;
                         let _ = tabs[active].evaluate_script(&agent_cursor_js(fx, fy));
                     }
+                    if let crate::protocol::Command::ScrollDom { dx, dy } = &cmd {
+                        let js = format!("window.scrollBy({dx},{dy});");
+                        let ok = tabs[active].evaluate_script(&js).is_ok();
+                        controller.log_command(&cmd, ok);
+                        let _ = reply.send(if ok {
+                            crate::protocol::Response::Ok { message: "scrolled DOM".into() }
+                        } else {
+                            crate::protocol::Response::Error { message: "DOM scroll failed".into() }
+                        });
+                        return;
+                    }
+                    let query = match &cmd {
+                        crate::protocol::Command::PageText => Some(("page_text", page_text_js())),
+                        crate::protocol::Command::PageElements => Some(("page_elements", page_elements_js())),
+                        crate::protocol::Command::ScrollIntoView { text } => {
+                            Some(("scroll_into_view", scroll_into_view_js(text)))
+                        }
+                        _ => None,
+                    };
+                    if let Some((kind, js)) = query {
+                        let target_tab = active;
+                        controller.log_command(&cmd, true);
+                        let slot = Arc::new(Mutex::new(Some((kind.to_string(), reply, target_tab))));
+                        let slot_cb = slot.clone();
+                        let proxy_cb = ui_proxy.clone();
+                        if let Err(e) = tabs[target_tab].evaluate_script_with_callback(&js, move |text| {
+                            if let Some((kind, reply, tab)) = slot_cb.lock().unwrap().take() {
+                                let _ = proxy_cb.send_event(crate::ipc::UserEvent::PageQueryResult {
+                                    kind, text, reply, tab,
+                                });
+                            }
+                        }) {
+                            if let Some((_, reply, _)) = slot.lock().unwrap().take() {
+                                let _ = reply.send(crate::protocol::Response::Error {
+                                    message: format!("page query failed: {e}"),
+                                });
+                            }
+                        }
+                        return;
+                    }
                     let needs_check = matches!(cmd,
                         crate::protocol::Command::Click { .. } | crate::protocol::Command::Type { .. });
                     if needs_check {
@@ -615,6 +693,41 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     _ => {}
                 },
+                crate::ipc::UserEvent::PageQueryResult { kind, text, reply, tab } => {
+                    if tab != active {
+                        let _ = reply.send(crate::protocol::Response::Error {
+                            message: "tab changed during page query".into(),
+                        });
+                        return;
+                    }
+                    let output = if kind == "page_elements" {
+                        match serde_json::from_str::<serde_json::Value>(&text) {
+                            Ok(mut v) => {
+                                let inner_w = v.get("innerWidth").and_then(|x| x.as_f64()).unwrap_or(1.0);
+                                let inner_h = v.get("innerHeight").and_then(|x| x.as_f64()).unwrap_or(1.0);
+                                let vv = controller.viewport();
+                                let rx = vv.width as f64 / inner_w.max(1.0);
+                                let ry = vv.height as f64 / inner_h.max(1.0);
+                                if let Some(elements) = v.get_mut("elements").and_then(|e| e.as_array_mut()) {
+                                    for el in elements.iter_mut() {
+                                        if let (Some(x), Some(y)) = (
+                                            el.get("x").and_then(|n| n.as_f64()),
+                                            el.get("y").and_then(|n| n.as_f64()),
+                                        ) {
+                                            el["sx"] = serde_json::json!((vv.x as f64 + x * rx) as i32);
+                                            el["sy"] = serde_json::json!((vv.y as f64 + y * ry) as i32);
+                                        }
+                                    }
+                                }
+                                serde_json::to_string(&v).unwrap_or(text)
+                            }
+                            Err(_) => text,
+                        }
+                    } else {
+                        text
+                    };
+                    let _ = reply.send(crate::protocol::Response::Text { text: output });
+                }
                 crate::ipc::UserEvent::TabsReady => {
                     refresh_tabs(&tab_strip, &titles, &urls, active);
                 }
