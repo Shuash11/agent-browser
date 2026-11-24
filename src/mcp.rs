@@ -65,6 +65,26 @@ pub struct DockParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct LayoutParams {
+    /// Force a fresh DOM scan instead of using the cached snapshot.
+    pub refresh: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IdParams {
+    /// Element ID from browser_layout, e.g. e7.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TypeIdParams {
+    /// Element ID from browser_layout, e.g. e7.
+    pub id: String,
+    /// Text to type.
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ScrollDomParams {
     /// Horizontal pixels; positive scrolls right.
     pub dx: i32,
@@ -161,6 +181,30 @@ impl BrowserService {
         Parameters(p): Parameters<IndexParams>,
     ) -> Result<String, McpError> {
         pack(ipc::call(Command::FocusTab { index: p.index }).await)
+    }
+
+    #[tool(description = "Read the harness-cached layout: all visible elements with stable IDs and screen coordinates. Prefer this over page_elements.")]
+    async fn browser_layout(
+        &self,
+        Parameters(p): Parameters<LayoutParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Layout { refresh: p.refresh.unwrap_or(false) }).await)
+    }
+
+    #[tool(description = "Click an element by its cached layout ID (from browser_layout).")]
+    async fn browser_click_id(
+        &self,
+        Parameters(p): Parameters<IdParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::ClickId { id: p.id }).await)
+    }
+
+    #[tool(description = "Type into an element by its cached layout ID (from browser_layout).")]
+    async fn browser_type_id(
+        &self,
+        Parameters(p): Parameters<TypeIdParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::TypeId { id: p.id, text: p.text }).await)
     }
 
     #[tool(description = "Read the active page as plain text (title, URL, visible text). Cheaper than a screenshot.")]

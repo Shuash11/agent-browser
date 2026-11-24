@@ -20,6 +20,7 @@ pub enum UserEvent {
         reply: oneshot::Sender<Response>,
         is_password: bool,
         tab: usize,
+        then_type: Option<String>,
     },
     /// Output chunk from the embedded OpenCode PTY.
     TermOutput { data: String },
@@ -47,6 +48,8 @@ pub enum UserEvent {
     UpdateChecked { result: Result<Option<crate::updater::ReleaseInfo>, String> },
     /// Download/install preparation failed.
     UpdateFailed { message: String },
+    /// Page DOM changed; cached layout is stale.
+    LayoutDirty,
     /// A tab finished loading; used to sync the address bar and tab strip.
     PageLoaded { url: String, tab: usize },
 }

@@ -70,6 +70,36 @@ window.__abCursor=null;
     )
 }
 
+#[derive(Clone, serde::Serialize)]
+struct LayoutEntry {
+    id: String,
+    tag: String,
+    role: String,
+    label: String,
+    sx: i32,
+    sy: i32,
+    w: i32,
+    h: i32,
+}
+
+#[derive(Default)]
+struct LayoutCache {
+    tab: usize,
+    url: String,
+    entries: Vec<LayoutEntry>,
+    dirty: bool,
+}
+
+fn layout_json(cache: &LayoutCache) -> String {
+    serde_json::json!({
+        "tab": cache.tab,
+        "url": cache.url,
+        "count": cache.entries.len(),
+        "elements": cache.entries,
+    })
+    .to_string()
+}
+
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -180,6 +210,13 @@ Element.prototype.attachShadow = function (init) {
   try { window.__abClosedHosts.add(this); } catch (e) {}
   return orig.call(this, init);
 };
+try {
+  new MutationObserver(function () {
+    window.chrome.webview.postMessage(JSON.stringify({ type: 'layout_changed' }));
+  }).observe(document.documentElement, {
+    childList: true, subtree: true, attributes: true, characterData: true
+  });
+} catch (e) {}
 })();"#;
 
 fn opencode_command() -> (String, Vec<String>) {
@@ -379,6 +416,10 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
             .with_ipc_handler(move |request| {
                 if let Ok(msg) = serde_json::from_str::<serde_json::Value>(request.body()) {
                     let kind = msg.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    if kind == "layout_changed" {
+                        let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::LayoutDirty);
+                        return;
+                    }
                     let value = msg.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
                     let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::BrowserAction {
                         kind, value, tab: Some(i),
@@ -477,6 +518,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut term_ready = false;
     let mut pending_output: Vec<String> = Vec::new();
+    let mut layout_cache = LayoutCache::default();
     let mut dock = "left".to_string();
     let mut term_size = TERMINAL_W;
     let mut win_w = WINDOW_W;
@@ -496,12 +538,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 // tao reports physical pixels; child WebView bounds are logical.
                 win_w = (size.width as f64 / scale) as i32;
                 win_h = (size.height as f64 / scale) as i32;
+                layout_cache.dirty = true;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                     &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
                 let _ = terminal.evaluate_script("window.__fit && window.__fit()");
             }
             tao::event::Event::WindowEvent { event: tao::event::WindowEvent::Moved(pos), .. } => {
                 origin = pos;
+                layout_cache.dirty = true;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                     &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
             }
@@ -509,6 +553,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 event: tao::event::WindowEvent::ScaleFactorChanged { scale_factor, .. }, ..
             } => {
                 scale = scale_factor;
+                layout_cache.dirty = true;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                     &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
                 let _ = terminal.evaluate_script("window.__fit && window.__fit()");
@@ -528,7 +573,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                crate::ipc::UserEvent::Ipc { cmd, reply } => {
+                crate::ipc::UserEvent::Ipc { mut cmd, reply } => {
                     if matches!(cmd, crate::protocol::Command::ListTabs) {
                         controller.log_command(&cmd, true);
                         let list: Vec<crate::protocol::TabInfo> = titles.iter()
@@ -543,6 +588,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         controller.log_command(&cmd, *index < tabs.len());
                         if *index < tabs.len() {
                             active = activate_tab(*index, &tabs, &toolbar, &urls);
+                            layout_cache.dirty = true;
                             refresh_tabs(&tab_strip, &titles, &urls, active);
                             let _ = reply.send(crate::protocol::Response::Ok {
                                 message: format!("focused tab {active}"),
@@ -577,6 +623,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     if let crate::protocol::Command::ScrollDom { dx, dy } = &cmd {
                         let js = format!("window.scrollBy({dx},{dy});");
                         let ok = tabs[active].evaluate_script(&js).is_ok();
+                        layout_cache.dirty = true;
                         controller.log_command(&cmd, ok);
                         let _ = reply.send(if ok {
                             crate::protocol::Response::Ok { message: "scrolled DOM".into() }
@@ -585,6 +632,67 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         });
                         return;
                     }
+                    if let crate::protocol::Command::Layout { refresh } = &cmd {
+                        let valid = !refresh && !layout_cache.dirty
+                            && layout_cache.tab == active
+                            && layout_cache.url == urls[active];
+                        if valid {
+                            controller.log_command(&cmd, true);
+                            let _ = reply.send(crate::protocol::Response::Text {
+                                text: layout_json(&layout_cache),
+                            });
+                            return;
+                        }
+                        let target_tab = active;
+                        let slot = Arc::new(Mutex::new(Some(("layout".to_string(), reply, target_tab))));
+                        let slot_cb = slot.clone();
+                        let proxy_cb = ui_proxy.clone();
+                        if let Err(e) = tabs[target_tab].evaluate_script_with_callback(
+                            &page_elements_js(), move |text| {
+                                if let Some((kind, reply, tab)) = slot_cb.lock().unwrap().take() {
+                                    let _ = proxy_cb.send_event(crate::ipc::UserEvent::PageQueryResult {
+                                        kind, text, reply, tab,
+                                    });
+                                }
+                            },
+                        ) {
+                            if let Some((_, reply, _)) = slot.lock().unwrap().take() {
+                                let _ = reply.send(crate::protocol::Response::Error {
+                                    message: format!("layout scan failed: {e}"),
+                                });
+                            }
+                        }
+                        return;
+                    }
+
+                    let mut pending_type: Option<String> = None;
+                    let mut resolved_id: Option<String> = None;
+                    if let crate::protocol::Command::ClickId { id } = &cmd {
+                        resolved_id = Some(id.clone());
+                    }
+                    if let crate::protocol::Command::TypeId { id, text } = &cmd {
+                        resolved_id = Some(id.clone());
+                        pending_type = Some(text.clone());
+                    }
+                    if let Some(id) = resolved_id {
+                        let found = layout_cache.entries.iter().find(|e| e.id == id).cloned();
+                        match found {
+                            Some(el) => {
+                                cmd = crate::protocol::Command::Click {
+                                    x: el.sx,
+                                    y: el.sy,
+                                    button: crate::protocol::MouseButton::Left,
+                                };
+                            }
+                            None => {
+                                let _ = reply.send(crate::protocol::Response::Error {
+                                    message: format!("unknown layout id: {id}; call browser_layout"),
+                                });
+                                return;
+                            }
+                        }
+                    }
+
                     let query = match &cmd {
                         crate::protocol::Command::PageText => Some(("page_text", page_text_js())),
                         crate::protocol::Command::PageElements => Some(("page_elements", page_elements_js())),
@@ -594,6 +702,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         _ => None,
                     };
                     if let Some((kind, js)) = query {
+                        if kind == "scroll_into_view" { layout_cache.dirty = true; }
                         let target_tab = active;
                         controller.log_command(&cmd, true);
                         let slot = Arc::new(Mutex::new(Some((kind.to_string(), reply, target_tab))));
@@ -633,6 +742,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some((cmd, reply)) = slot_cb.lock().unwrap().take() {
                                 let _ = proxy_cb.send_event(crate::ipc::UserEvent::PasswordChecked {
                                     cmd, reply, is_password: value.contains("true"), tab: target_tab,
+                                    then_type: pending_type.clone(),
                                 });
                             }
                         }) {
@@ -647,7 +757,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = reply.send(response);
                     }
                 }
-                crate::ipc::UserEvent::PasswordChecked { cmd, reply, is_password, tab } => {
+                crate::ipc::UserEvent::PasswordChecked { cmd, reply, is_password, tab, then_type } => {
                     if tab != active {
                         let _ = reply.send(crate::protocol::Response::Error {
                             message: "tab changed during safety check; action cancelled".into(),
@@ -655,6 +765,18 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                     let response = controller.execute(&cmd, &tabs[tab], is_password);
+                    let failed = matches!(response, crate::protocol::Response::Error { .. });
+                    if !failed {
+                        if let Some(text) = then_type {
+                            let typed = controller.execute(
+                                &crate::protocol::Command::Type { text },
+                                &tabs[tab],
+                                is_password,
+                            );
+                            let _ = reply.send(typed);
+                            return;
+                        }
+                    }
                     let _ = reply.send(response);
                 }
                 crate::ipc::UserEvent::BrowserAction { kind, value, tab } => {
@@ -679,6 +801,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 crate::ipc::UserEvent::PageLoaded { url, tab } => {
+                    if tab == active { layout_cache.dirty = true; }
                     if tab < urls.len() {
                         urls[tab] = url.clone();
                         titles[tab] = if url == newtab_url {
@@ -699,6 +822,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     "focus" => {
                         if let Some(i) = index.filter(|i| *i < tabs.len()) {
                             active = activate_tab(i, &tabs, &toolbar, &urls);
+                            layout_cache.dirty = true;
                             refresh_tabs(&tab_strip, &titles, &urls, active);
                         }
                     }
@@ -708,6 +832,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         urls[next] = newtab_url.to_string();
                         titles[next] = "New Tab".into();
                         active = activate_tab(next, &tabs, &toolbar, &urls);
+                        layout_cache.dirty = true;
                         refresh_tabs(&tab_strip, &titles, &urls, active);
                     }
                     _ => {}
@@ -719,9 +844,17 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         });
                         return;
                     }
-                    let output = if kind == "page_elements" {
+                    let is_scan = kind == "page_elements" || kind == "layout";
+                    let converted = if is_scan {
                         match serde_json::from_str::<serde_json::Value>(&text) {
-                            Ok(mut v) => {
+                            Ok(raw) => {
+                                let mut v = match raw {
+                                    serde_json::Value::String(s) => {
+                                        serde_json::from_str::<serde_json::Value>(&s)
+                                            .unwrap_or(serde_json::Value::Null)
+                                    }
+                                    other => other,
+                                };
                                 let inner_w = v.get("innerWidth").and_then(|x| x.as_f64()).unwrap_or(1.0);
                                 let inner_h = v.get("innerHeight").and_then(|x| x.as_f64()).unwrap_or(1.0);
                                 let vv = controller.viewport();
@@ -738,15 +871,63 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
                                 }
-                                serde_json::to_string(&v).unwrap_or(text)
+                                v
                             }
-                            Err(_) => text,
+                            Err(_) => {
+                                let _ = reply.send(crate::protocol::Response::Error {
+                                    message: "invalid layout scan result".into(),
+                                });
+                                return;
+                            }
                         }
                     } else {
-                        text
+                        serde_json::Value::String(text)
+                    };
+                    // WebView2 serializes the JS string result; unwrap once.
+                    let converted = match converted {
+                        serde_json::Value::String(s) => {
+                            serde_json::from_str::<serde_json::Value>(&s)
+                                .unwrap_or(serde_json::Value::Null)
+                        }
+                        other => other,
+                    };
+
+                    if kind == "layout" {
+                        let mut entries = Vec::new();
+                        if let Some(elements) = converted.get("elements").and_then(|e| e.as_array()) {
+                            for (n, el) in elements.iter().enumerate() {
+                                entries.push(LayoutEntry {
+                                    id: format!("e{}", n + 1),
+                                    tag: el.get("tag").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    role: el.get("role").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    label: el.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    sx: el.get("sx").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                                    sy: el.get("sy").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                                    w: el.get("w").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                                    h: el.get("h").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                                });
+                            }
+                        }
+                        layout_cache = LayoutCache {
+                            tab,
+                            url: urls[tab].clone(),
+                            entries,
+                            dirty: false,
+                        };
+                        let _ = reply.send(crate::protocol::Response::Text {
+                            text: layout_json(&layout_cache),
+                        });
+                        return;
+                    }
+
+                    let output = if is_scan {
+                        converted.to_string()
+                    } else {
+                        converted.get(0).and_then(|v| v.as_str()).unwrap_or("").to_string()
                     };
                     let _ = reply.send(crate::protocol::Response::Text { text: output });
                 }
+                crate::ipc::UserEvent::LayoutDirty => { layout_cache.dirty = true; }
                 crate::ipc::UserEvent::UpdateCheck => {
                     let p = ui_proxy.clone();
                     std::thread::spawn(move || {
@@ -851,6 +1032,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         if dock == "left" { "bottom".into() } else { "left".into() }
                     } else { mode };
                     term_size = if dock == "left" { TERMINAL_W } else { win_h / 2 };
+                    layout_cache.dirty = true;
                     let _ = terminal.evaluate_script(&format!("window.__setDock('{dock}')"));
                     let _ = divider.evaluate_script(&format!("window.__setDock('{dock}')"));
                     controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
@@ -860,6 +1042,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 crate::ipc::UserEvent::SplitDelta { delta } => {
                     let max_size = if dock == "left" { win_w - TAB_W - 360 } else { win_h - 300 };
                     term_size = (term_size + delta).clamp(MIN_TERM, max_size);
+                    layout_cache.dirty = true;
                     controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                         &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
                     let _ = terminal.evaluate_script("window.__fit && window.__fit()");

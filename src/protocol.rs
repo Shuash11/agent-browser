@@ -51,6 +51,12 @@ pub enum Command {
     ScrollDom { dx: i32, dy: i32 },
     /// Scroll an element containing the given text into view.
     ScrollIntoView { text: String },
+    /// Return the harness-cached layout snapshot (optionally refreshed).
+    Layout { refresh: bool },
+    /// Click an element by its cached layout ID.
+    ClickId { id: String },
+    /// Type into an element by its cached layout ID.
+    TypeId { id: String, text: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

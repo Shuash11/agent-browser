@@ -33,6 +33,7 @@ Typography: system stack `Segoe UI Variable, Segoe UI, Inter, system-ui, sans-se
 - Window 1600×900 default, **resizable** with min 1100×680.
 - Four page tabs share one WebContext. A 140 px tab strip sits on the far right; the agent viewport excludes it.
 - Tab 1 defaults to an app-styled New Tab page (search + quick links), not an external site.
+- Layout cache: one harness-side DOM scan per page state; elements receive stable IDs (`eN`) and screen-space centres. Cache invalidates on navigation, scroll, resize, dock change, tab switch, and DOM mutation.
 - Left dock: terminal `term_size` (default 540, clamped 260…w−400), divider 8px, toolbar 44px, page fills remainder.
 - Bottom dock: page top, toolbar 44px, divider 8px, terminal bottom (default h/2, clamped 180…h−300).
 - Toolbar internals: Back 32px, Forward 32px, Reload 32px, Home 32px, gaps 8px, URL flex `min-width:0`, status 16px. Padding 12px.

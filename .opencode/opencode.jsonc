@@ -49,6 +49,10 @@
     { "action": "agent_browser_browser_type", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_key", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_focus_tab", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_layout", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_click_id", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_type_id", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_dock", "resource": "*", "effect": "allow" }
   ]
 }
+
