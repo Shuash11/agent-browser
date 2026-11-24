@@ -1,6 +1,6 @@
 !define APPNAME "Agent Browser"
 !ifndef VERSION
-  !define VERSION "0.1.1"
+  !define VERSION "0.1.2"
 !endif
 !define PUBLISHER "Shuash11"
 
@@ -23,8 +23,8 @@ Section "Install (required)" SEC01
   File /r "staging\*.*"
 
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
-  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\target\release\agent-browser.exe" "" "$INSTDIR\target\release\agent-browser.exe" 0
-  CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\target\release\agent-browser.exe" "" "$INSTDIR\target\release\agent-browser.exe" 0
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\start-agent-browser.ps1"' "$INSTDIR\target\release\agent-browser.exe" 0
+  CreateShortcut "$DESKTOP\${APPNAME}.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "$INSTDIR\start-agent-browser.ps1"' "$INSTDIR\target\release\agent-browser.exe" 0
 
   WriteRegStr HKCU "Software\AgentBrowser" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AgentBrowser" "DisplayName" "${APPNAME} ${VERSION}"

@@ -1,4 +1,4 @@
-param([string]$Version = "0.1.1")
+param([string]$Version = "0.1.2")
 
 $root = Split-Path -Parent $PSScriptRoot
 $stage = Join-Path $PSScriptRoot "staging"
@@ -13,6 +13,7 @@ $files = @(
   "README.md",
   "DESIGN.md",
   "LICENSE",
+  "start-agent-browser.ps1",
   "tests/fixture.html",
   "assets/terminal/index.html",
   "assets/terminal/toolbar.html",
