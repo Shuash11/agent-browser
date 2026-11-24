@@ -31,7 +31,7 @@ Use the MCP tools provided by the `agent-browser` server:
 3. Password inputs are refused by policy. Never try to read, type, or bypass credentials.
 4. Use `browser_page_elements` to locate controls and `browser_scroll_into_view` to reach them. Take a screenshot only when visual verification is genuinely needed.
 5. All actions are logged locally; do not modify logs or policy code to bypass checks.
-6. Never publish, submit, or purchase anything without explicit user approval.
+6. Never publish, submit, purchase, or **install updates** without explicit user approval. Updates are user-only via the terminal header button; no MCP tool exposes them.
 
 ## Coordination with the user
 

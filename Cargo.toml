@@ -1,6 +1,6 @@
 [package]
 name = "agent-browser"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Local browser panel controlled by OpenCode over MCP (personal use)"
 
@@ -17,5 +17,8 @@ tokio = { version = "1.54.1", features = ["full"] }
 url = "2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 portable-pty = "0.9.0"
+ureq = "3.5.2"
+sha2 = "0.11.1"
+semver = "1.0.28"
 
 [dev-dependencies]

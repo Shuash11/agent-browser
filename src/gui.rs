@@ -70,6 +70,22 @@ window.__abCursor=null;
     )
 }
 
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn message_box(text: &str, caption: &str, flags: u32) -> i32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW;
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            wide(text).as_ptr(),
+            wide(caption).as_ptr(),
+            flags,
+        )
+    }
+}
+
 fn page_text_js() -> String {
     "(function(){return JSON.stringify({title:document.title,url:location.href,\
      text:(document.body&&document.body.innerText||'').slice(0,8000)});})()".to_string()
@@ -280,6 +296,9 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = term_proxy_ipc.send_event(crate::ipc::UserEvent::SetDock {
                             mode: "toggle".into(),
                         });
+                    }
+                    Some("update_check") => {
+                        let _ = term_proxy_ipc.send_event(crate::ipc::UserEvent::UpdateCheck);
                     }
                     _ => {}
                 }
@@ -727,6 +746,102 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         text
                     };
                     let _ = reply.send(crate::protocol::Response::Text { text: output });
+                }
+                crate::ipc::UserEvent::UpdateCheck => {
+                    let p = ui_proxy.clone();
+                    std::thread::spawn(move || {
+                        let result = crate::updater::check_latest();
+                        let _ = p.send_event(crate::ipc::UserEvent::UpdateChecked { result });
+                    });
+                }
+                crate::ipc::UserEvent::UpdateChecked { result } => {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{
+                        MB_ICONERROR, MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK,
+                        MB_SETFOREGROUND, MB_YESNOCANCEL,
+                    };
+                    match result {
+                        Err(msg) => {
+                            message_box(
+                                &format!("Could not check for updates.\n\n{msg}"),
+                                "Agent Browser",
+                                MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
+                            );
+                        }
+                        Ok(None) => {
+                            message_box(
+                                "You are running the latest version.",
+                                "Agent Browser",
+                                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND,
+                            );
+                        }
+                        Ok(Some(info)) => {
+                            if crate::updater::is_skipped(&root, &info.tag) {
+                                message_box(
+                                    &format!("Update {} is available, but it was skipped.", info.version),
+                                    "Agent Browser",
+                                    MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND,
+                                );
+                                return;
+                            }
+                            let notes: String = info.notes.chars().take(600).collect();
+                            let answer = message_box(
+                                &format!(
+                                    "Agent Browser {} is available.\n\n{}\n\nYes = update now\nNo = remind me later\nCancel = skip this version",
+                                    info.version, notes
+                                ),
+                                "Agent Browser update",
+                                MB_YESNOCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND,
+                            );
+                            if answer == 2 {
+                                crate::updater::skip(&root, &info.tag);
+                            } else if answer == 6 {
+                                let p = ui_proxy.clone();
+                                let app_root = root.clone();
+                                let release = info.clone();
+                                std::thread::spawn(move || {
+                                    let installer = std::env::temp_dir().join(format!(
+                                        "agent-browser-{}-{}",
+                                        release.version, release.asset_name
+                                    ));
+                                    if let Err(e) = crate::updater::download_verified(
+                                        &release, &installer,
+                                    ) {
+                                        let _ = p.send_event(crate::ipc::UserEvent::UpdateFailed {
+                                            message: e,
+                                        });
+                                        return;
+                                    }
+                                    let script = app_root.join("apply-update.ps1");
+                                    let launcher = app_root.join("start-agent-browser.ps1");
+                                    let result = std::process::Command::new("powershell.exe")
+                                        .args([
+                                            "-NoProfile", "-WindowStyle", "Hidden",
+                                            "-ExecutionPolicy", "Bypass", "-File",
+                                        ])
+                                        .arg(&script)
+                                        .arg(&installer)
+                                        .arg(&app_root)
+                                        .arg(&launcher)
+                                        .spawn();
+                                    if let Err(e) = result {
+                                        let _ = p.send_event(crate::ipc::UserEvent::UpdateFailed {
+                                            message: format!("could not start updater: {e}"),
+                                        });
+                                    }
+                                });
+                                session.terminate();
+                                *control_flow = ControlFlow::Exit;
+                            }
+                        }
+                    }
+                }
+                crate::ipc::UserEvent::UpdateFailed { message } => {
+                    use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK};
+                    message_box(
+                        &format!("Update failed.\n\n{message}"),
+                        "Agent Browser",
+                        MB_OK | MB_ICONERROR,
+                    );
                 }
                 crate::ipc::UserEvent::TabsReady => {
                     refresh_tabs(&tab_strip, &titles, &urls, active);

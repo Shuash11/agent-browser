@@ -22,6 +22,7 @@
 <div id="bar">
   <strong>OpenCode</strong>
   <span class="sub">embedded session · local PTY</span>
+  <button id="update" aria-label="Check for updates">Check for updates</button>
   <button id="dock" aria-label="Toggle terminal dock position">Dock: Left</button>
 </div>
 <div id="term"></div>
@@ -32,6 +33,9 @@
   };
   document.getElementById('dock').addEventListener('click', function () {
     window.chrome.webview.postMessage(JSON.stringify({ type: 'dock' }));
+  });
+  document.getElementById('update').addEventListener('click', function () {
+    window.chrome.webview.postMessage(JSON.stringify({ type: 'update_check' }));
   });
   window.onerror = function (m) {
     window.chrome.webview.postMessage(JSON.stringify({ type: 'jserror', message: String(m) }));

@@ -41,6 +41,12 @@ pub enum UserEvent {
         reply: oneshot::Sender<Response>,
         tab: usize,
     },
+    /// User clicked "Check for updates" in the terminal header.
+    UpdateCheck,
+    /// Result of the background GitHub release check.
+    UpdateChecked { result: Result<Option<crate::updater::ReleaseInfo>, String> },
+    /// Download/install preparation failed.
+    UpdateFailed { message: String },
     /// A tab finished loading; used to sync the address bar and tab strip.
     PageLoaded { url: String, tab: usize },
 }

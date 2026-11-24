@@ -57,6 +57,9 @@ Only hover/focus color transitions (120ms ease). No entrance animations, no blur
 ## Accessibility
 Visible focus rings, semantic buttons with `aria-label`, live region for navigation status, ≥24px targets, contrast-checked muted text, keyboard operation of all toolbar controls, reduced-motion support. Drag has a non-drag alternative (`browser_dock` / dock button).
 
+## Update dialog
+A native Windows dialog with three choices: **Yes = Update now**, **No = Remind me later**, **Cancel = Skip this version**. Triggered only by the user's "Check for updates" button in the terminal header. Message shows the new version and truncated release notes. "Skip" persists the tag in `data/update-state.json`. Download is SHA-256 verified against the GitHub asset digest before any installer runs.
+
 ## Acceptance
 - Rendered window matches tokens and spacing at 1600×900, 1100×700, and bottom dock.
 - Resizing updates both WebViews and the agent viewport without overlap.
