@@ -52,8 +52,6 @@ pub enum UserEvent {
     LayoutDirty,
     /// Functional macOS-style window control.
     WindowAction { action: String },
-    /// User-only: launch an installed system browser.
-    LaunchApp { app: String },
     /// A tab finished loading; used to sync the address bar and tab strip.
     PageLoaded { url: String, tab: usize },
 }

@@ -100,25 +100,6 @@ fn layout_json(cache: &LayoutCache) -> String {
     .to_string()
 }
 
-fn system_browser_path(app: &str) -> Option<PathBuf> {
-    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());
-    let pf86 = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".into());
-    let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
-    let candidates: Vec<PathBuf> = match app {
-        "chrome" => [
-            PathBuf::from(&pf).join("Google/Chrome/Application/chrome.exe"),
-            PathBuf::from(&pf86).join("Google/Chrome/Application/chrome.exe"),
-            PathBuf::from(&local).join("Google/Chrome/Application/chrome.exe"),
-        ].to_vec(),
-        "edge" => [
-            PathBuf::from(&pf86).join("Microsoft/Edge/Application/msedge.exe"),
-            PathBuf::from(&pf).join("Microsoft/Edge/Application/msedge.exe"),
-        ].to_vec(),
-        _ => Vec::new(),
-    };
-    candidates.into_iter().find(|p| p.is_file())
-}
-
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -402,13 +383,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             });
                         }
                     }
-                    Some("launch_app") => {
-                        if let Some(app) = msg.get("app").and_then(|v| v.as_str()) {
-                            let _ = term_proxy_ipc.send_event(crate::ipc::UserEvent::LaunchApp {
-                                app: app.to_string(),
-                            });
-                        }
-                    }
                     _ => {}
                 }
             }
@@ -479,14 +453,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     let kind = msg.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
                     if kind == "layout_changed" {
                         let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::LayoutDirty);
-                        return;
-                    }
-                    if kind == "launch_app" {
-                        if let Some(app) = msg.get("app").and_then(|v| v.as_str()) {
-                            let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::LaunchApp {
-                                app: app.to_string(),
-                            });
-                        }
                         return;
                     }
                     let value = msg.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -1052,24 +1018,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         *control_flow = ControlFlow::Exit;
                     } else {
                         window_command(&action);
-                    }
-                }
-                crate::ipc::UserEvent::LaunchApp { app } => {
-                    let status = match system_browser_path(&app) {
-                        Some(path) => {
-                            let label = if app == "chrome" { "Chrome" } else { "Edge" };
-                            match std::process::Command::new(&path)
-                                .arg("--new-window")
-                                .spawn()
-                            {
-                                Ok(_) => format!("{label} launched"),
-                                Err(e) => format!("{label} failed to launch: {e}"),
-                            }
-                        }
-                        None => format!("{} not found on this PC", if app == "chrome" { "Chrome" } else { "Edge" }),
-                    };
-                    if let Ok(js) = serde_json::to_string(&status) {
-                        let _ = terminal.evaluate_script(&format!("window.__setUpdateStatus({js})"));
                     }
                 }
                 crate::ipc::UserEvent::LayoutDirty => { layout_cache.dirty = true; }
