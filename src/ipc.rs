@@ -19,6 +19,7 @@ pub enum UserEvent {
         cmd: Command,
         reply: oneshot::Sender<Response>,
         is_password: bool,
+        tab: usize,
     },
     /// Output chunk from the embedded OpenCode PTY.
     TermOutput { data: String },

@@ -13,18 +13,31 @@ use crate::ipc::UserEvent;
 pub type TerminalWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type TerminalMaster = Arc<Mutex<Box<dyn MasterPty + Send>>>;
 
+struct ChildGuard {
+    child: Mutex<Box<dyn Child + Send + Sync>>,
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct TerminalSession {
     pub writer: TerminalWriter,
     master: TerminalMaster,
-    _child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
+    guard: Arc<ChildGuard>,
 }
 
 impl TerminalSession {
-    /// Spawn a CLI program inside a ConPTY, cwd = repo root. Output chunks are
-    /// delivered to the GUI as `UserEvent::TermOutput`.
+    /// Spawn a CLI program inside a ConPTY, cwd = runtime app root. Output
+    /// chunks are delivered to the GUI as `UserEvent::TermOutput`.
     pub fn spawn(
         prog: &str,
+        args: &[&str],
         cwd: &PathBuf,
         proxy: EventLoopProxy<UserEvent>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -37,12 +50,16 @@ impl TerminalSession {
         })?;
 
         let mut cmd = CommandBuilder::new(prog);
+        for arg in args {
+            cmd.arg(arg);
+        }
         cmd.cwd(cwd);
         let child = pair.slave.spawn_command(cmd)?;
+        // Own the child immediately so any later setup failure still kills it.
+        let guard = Arc::new(ChildGuard { child: Mutex::new(child) });
         let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
         let mut reader = pair.master.try_clone_reader()?;
         let master = Arc::new(Mutex::new(pair.master));
-        let child = Arc::new(Mutex::new(child));
 
         thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -58,7 +75,13 @@ impl TerminalSession {
             }
         });
 
-        Ok(Self { writer, master, _child: child })
+        Ok(Self { writer, master, guard })
+    }
+
+    pub fn terminate(&self) {
+        if let Ok(mut child) = self.guard.child.lock() {
+            let _ = child.kill();
+        }
     }
 
     pub fn resize(&self, cols: u16, rows: u16) {
@@ -72,7 +95,6 @@ impl TerminalSession {
         }
     }
 
-    /// Clone the writer handle for the WebView IPC handler.
     pub fn writer_handle(&self) -> TerminalWriter {
         self.writer.clone()
     }

@@ -43,7 +43,11 @@ const MIN_TERM: i32 = 240;
 const TOOLBAR_H: i32 = 44;
 
 fn project_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // Runtime resources live beside the executable: <root>/target/release/agent-browser.exe
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().and_then(|a| a.parent()).and_then(|b| b.parent()).map(|c| c.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn agent_cursor_js(fx: f64, fy: f64) -> String {
@@ -57,7 +61,11 @@ c.style.left=({fx}*window.innerWidth)+'px';c.style.top=({fy}*window.innerHeight)
 var s=document.getElementById('__abHide');
 if(!s){{s=document.createElement('style');s.id='__abHide';s.textContent='*{{cursor:none !important}}';document.documentElement.appendChild(s);}}
 clearTimeout(window.__abHideTimer);
-window.__abHideTimer=setTimeout(function(){{if(s.parentNode)s.parentNode.removeChild(s);}},900);
+window.__abHideTimer=setTimeout(function(){{
+if(s.parentNode)s.parentNode.removeChild(s);
+if(c.parentNode)c.parentNode.removeChild(c);
+window.__abCursor=null;
+}},900);
 }})()"#
     )
 }
@@ -87,8 +95,8 @@ fn layout_bounds(
         toolbar.set_bounds(rect(area_x, 0, area_w, TOOLBAR_H)).ok();
         for tab in tabs { tab.set_bounds(rect(area_x, TOOLBAR_H, area_w, h - TOOLBAR_H)).ok(); }
         crate::protocol::Viewport {
-            x: (origin.x as f64 * scale) as i32 + (area_x as f64 * scale) as i32,
-            y: (origin.y as f64 * scale) as i32 + (TOOLBAR_H as f64 * scale) as i32,
+            x: origin.x + (area_x as f64 * scale) as i32,
+            y: origin.y + (TOOLBAR_H as f64 * scale) as i32,
             width: (area_w as f64 * scale) as i32,
             height: ((h - TOOLBAR_H) as f64 * scale) as i32,
         }
@@ -101,12 +109,61 @@ fn layout_bounds(
         toolbar.set_bounds(rect(0, 0, w - TAB_W, TOOLBAR_H)).ok();
         for tab in tabs { tab.set_bounds(rect(0, TOOLBAR_H, w - TAB_W, area_h)).ok(); }
         crate::protocol::Viewport {
-            x: (origin.x as f64 * scale) as i32,
-            y: (origin.y as f64 * scale) as i32 + (TOOLBAR_H as f64 * scale) as i32,
+            x: origin.x,
+            y: origin.y + (TOOLBAR_H as f64 * scale) as i32,
             width: ((w - TAB_W) as f64 * scale) as i32,
             height: (area_h as f64 * scale) as i32,
         }
     }
+}
+
+// Runs before page scripts: records every shadow host, including closed ones,
+// so the password guard can fail closed without DevTools inspection.
+const SHADOW_TRACK_JS: &str = r#"(function(){
+window.__abClosedHosts = new WeakSet();
+var orig = Element.prototype.attachShadow;
+Element.prototype.attachShadow = function (init) {
+  try { window.__abClosedHosts.add(this); } catch (e) {}
+  return orig.call(this, init);
+};
+})();"#;
+
+fn opencode_command() -> (String, Vec<String>) {
+    let npm = std::env::var("APPDATA")
+        .map(|p| PathBuf::from(p).join("npm").join("opencode.cmd"))
+        .unwrap_or_default();
+    if npm.is_file() {
+        return (npm.to_string_lossy().to_string(), Vec::new());
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            for name in ["opencode.cmd", "opencode.exe", "opencode"] {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return (candidate.to_string_lossy().to_string(), Vec::new());
+                }
+            }
+        }
+    }
+    // Last resort: let cmd.exe resolve it from PATH or show a clear error.
+    ("cmd.exe".to_string(), vec!["/c".to_string(), "opencode".to_string()])
+}
+
+fn activate_tab(
+    index: usize,
+    tabs: &[wry::WebView],
+    toolbar: &wry::WebView,
+    urls: &[String],
+) -> usize {
+    let i = index.min(tabs.len().saturating_sub(1));
+    for (n, tab) in tabs.iter().enumerate() {
+        tab.set_visible(n == i).ok();
+    }
+    let _ = tabs[i].focus();
+    if let Ok(js) = serde_json::to_string(&urls[i]) {
+        let _ = toolbar.evaluate_script(&format!("window.__setUrl({js})"));
+    }
+    i
 }
 
 pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
@@ -122,16 +179,17 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let term_proxy = event_loop.create_proxy();
     let ui_proxy = event_loop.create_proxy();
     let window = WindowBuilder::new()
-        .with_title("Agent Browser — embedded OpenCode")
+        .with_title(crate::control::WINDOW_TITLE)
         .with_inner_size(TaoLogicalSize::new(WINDOW_W, WINDOW_H))
         .with_min_inner_size(TaoLogicalSize::new(MIN_WINDOW_W, MIN_WINDOW_H))
         .with_resizable(true)
         .build(&event_loop)?;
 
-    let npm = std::env::var("APPDATA")
-        .map(|p| PathBuf::from(p).join("npm").join("opencode.cmd"))
-        .unwrap_or_else(|_| PathBuf::from("cmd.exe"));
-    let session = crate::terminal::TerminalSession::spawn(&npm.to_string_lossy(), &root, term_proxy)?;
+    let (opencode_prog, opencode_args) = opencode_command();
+    let arg_refs: Vec<&str> = opencode_args.iter().map(|s| s.as_str()).collect();
+    let session = crate::terminal::TerminalSession::spawn(
+        &opencode_prog, &arg_refs, &root, term_proxy,
+    )?;
     let writer = session.writer_handle();
     let resize_session = session.clone();
     let term_proxy_ipc = event_loop.create_proxy();
@@ -232,6 +290,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         let dl_dir = downloads.clone();
         let lg_dir = logs.clone();
         let b = WebViewBuilder::new_with_web_context(&mut context)
+            .with_initialization_script(SHADOW_TRACK_JS)
             .with_bounds(rect(TERMINAL_W + DIVIDER_W, TOOLBAR_H,
                 WINDOW_W - TERMINAL_W - DIVIDER_W - TAB_W, WINDOW_H - TOOLBAR_H))
             .with_custom_protocol("abterm".into(), move |_id, request| {
@@ -331,8 +390,8 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         })
         .build_as_child(&window)?;
 
-    let scale = window.scale_factor();
-    let origin = window.inner_position()?;
+    let mut scale = window.scale_factor();
+    let mut origin = window.inner_position()?;
     let viewport = layout_bounds("left", TERMINAL_W, WINDOW_W, WINDOW_H,
         &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale);
     let mut controller = crate::control::Controller::new(viewport.clone(), logs.join("actions.jsonl"))?;
@@ -357,7 +416,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     };
     for (i, tab) in tabs.iter().enumerate() { tab.set_visible(i == 0).ok(); }
     refresh_tabs(&tab_strip, &titles, &urls, active);
-    println!("GUI ready: {} tabs, page viewport {:?}", tabs.len(), viewport);
+    println!("GUI ready: root={}; {} tabs, page viewport {:?}", root.display(), tabs.len(), viewport);
 
     let mut term_ready = false;
     let mut pending_output: Vec<String> = Vec::new();
@@ -369,9 +428,30 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
+            tao::event::Event::WindowEvent {
+                event: tao::event::WindowEvent::CloseRequested, ..
+            } => {
+                session.terminate();
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
             tao::event::Event::WindowEvent { event: tao::event::WindowEvent::Resized(size), .. } => {
-                win_w = size.width as i32;
-                win_h = size.height as i32;
+                // tao reports physical pixels; child WebView bounds are logical.
+                win_w = (size.width as f64 / scale) as i32;
+                win_h = (size.height as f64 / scale) as i32;
+                controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
+                    &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
+                let _ = terminal.evaluate_script("window.__fit && window.__fit()");
+            }
+            tao::event::Event::WindowEvent { event: tao::event::WindowEvent::Moved(pos), .. } => {
+                origin = pos;
+                controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
+                    &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
+            }
+            tao::event::Event::WindowEvent {
+                event: tao::event::WindowEvent::ScaleFactorChanged { scale_factor, .. }, ..
+            } => {
+                scale = scale_factor;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                     &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
                 let _ = terminal.evaluate_script("window.__fit && window.__fit()");
@@ -393,6 +473,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 crate::ipc::UserEvent::Ipc { cmd, reply } => {
                     if matches!(cmd, crate::protocol::Command::ListTabs) {
+                        controller.log_command(&cmd, true);
                         let list: Vec<crate::protocol::TabInfo> = titles.iter()
                             .zip(urls.iter()).enumerate()
                             .map(|(i, (t, u))| crate::protocol::TabInfo {
@@ -402,9 +483,9 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                     if let crate::protocol::Command::FocusTab { index } = &cmd {
+                        controller.log_command(&cmd, *index < tabs.len());
                         if *index < tabs.len() {
-                            for (n, tab) in tabs.iter().enumerate() { tab.set_visible(n == *index).ok(); }
-                            active = *index;
+                            active = activate_tab(*index, &tabs, &toolbar, &urls);
                             refresh_tabs(&tab_strip, &titles, &urls, active);
                             let _ = reply.send(crate::protocol::Response::Ok {
                                 message: format!("focused tab {active}"),
@@ -417,6 +498,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                     if let crate::protocol::Command::Dock { mode } = &cmd {
+                        let valid = matches!(mode.as_str(), "left" | "bottom" | "toggle");
+                        controller.log_command(&cmd, valid);
+                        if !valid {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "dock must be left, bottom, or toggle".into(),
+                            });
+                            return;
+                        }
                         let _ = ui_proxy.send_event(crate::ipc::UserEvent::SetDock { mode: mode.clone() });
                         let _ = reply.send(crate::protocol::Response::Ok { message: "dock requested".into() });
                         return;
@@ -439,13 +528,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             _ => None,
                         };
                         let js = crate::control::Controller::password_check_js(relative);
+                        let target_tab = active;
                         let slot = Arc::new(Mutex::new(Some((cmd, reply))));
                         let slot_cb = slot.clone();
                         let proxy_cb = ui_proxy.clone();
-                        if let Err(e) = tabs[active].evaluate_script_with_callback(&js, move |value| {
+                        if let Err(e) = tabs[target_tab].evaluate_script_with_callback(&js, move |value| {
                             if let Some((cmd, reply)) = slot_cb.lock().unwrap().take() {
                                 let _ = proxy_cb.send_event(crate::ipc::UserEvent::PasswordChecked {
-                                    cmd, reply, is_password: value.contains("true"),
+                                    cmd, reply, is_password: value.contains("true"), tab: target_tab,
                                 });
                             }
                         }) {
@@ -460,8 +550,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = reply.send(response);
                     }
                 }
-                crate::ipc::UserEvent::PasswordChecked { cmd, reply, is_password } => {
-                    let response = controller.execute(&cmd, &tabs[active], is_password);
+                crate::ipc::UserEvent::PasswordChecked { cmd, reply, is_password, tab } => {
+                    if tab != active {
+                        let _ = reply.send(crate::protocol::Response::Error {
+                            message: "tab changed during safety check; action cancelled".into(),
+                        });
+                        return;
+                    }
+                    let response = controller.execute(&cmd, &tabs[tab], is_password);
                     let _ = reply.send(response);
                 }
                 crate::ipc::UserEvent::BrowserAction { kind, value, tab } => {
@@ -505,21 +601,16 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 crate::ipc::UserEvent::TabAction { kind, index } => match kind.as_str() {
                     "focus" => {
                         if let Some(i) = index.filter(|i| *i < tabs.len()) {
-                            for (n, tab) in tabs.iter().enumerate() { tab.set_visible(n == i).ok(); }
-                            active = i;
+                            active = activate_tab(i, &tabs, &toolbar, &urls);
                             refresh_tabs(&tab_strip, &titles, &urls, active);
-                            if let Ok(js) = serde_json::to_string(&urls[active]) {
-                                let _ = toolbar.evaluate_script(&format!("window.__setUrl({js})"));
-                            }
                         }
                     }
                     "newtab" => {
                         let next = (active + 1) % tabs.len();
                         let _ = tabs[next].load_url(newtab_url);
-                        for (n, tab) in tabs.iter().enumerate() { tab.set_visible(n == next).ok(); }
-                        active = next;
                         urls[next] = newtab_url.to_string();
                         titles[next] = "New Tab".into();
+                        active = activate_tab(next, &tabs, &toolbar, &urls);
                         refresh_tabs(&tab_strip, &titles, &urls, active);
                     }
                     _ => {}

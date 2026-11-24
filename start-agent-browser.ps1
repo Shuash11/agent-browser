@@ -9,6 +9,9 @@ if (-not (Test-Path $exe)) {
   exit 1
 }
 
-Get-Process agent-browser -ErrorAction SilentlyContinue | Stop-Process -Force
+# Only stop stale GUI instances. Leave `agent-browser.exe mcp` bridges alive.
+Get-CimInstance Win32_Process -Filter "name='agent-browser.exe'" |
+  Where-Object { $_.CommandLine -notmatch '\bmcp\b' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Milliseconds 400
 Start-Process -FilePath $exe
