@@ -46,8 +46,8 @@
   <button class="chip" data-url="https://www.facebook.com"><span class="icon i-globe"></span><span>Facebook</span></button>
   <button class="chip" data-url="https://www.instagram.com"><span class="icon i-globe"></span><span>Instagram</span></button>
   <button class="chip" data-url="https://github.com"><span class="icon i-app-window"></span><span>GitHub</span></button>
-  <button class="chip" data-url="https://www.microsoft.com/edge"><span class="icon i-monitor"></span><span>Edge</span></button>
-  <button class="chip" data-url="https://www.google.com/chrome"><span class="icon i-globe"></span><span>Chrome</span></button>
+  <button class="chip" data-app="edge"><span class="icon i-monitor"></span><span>Edge</span></button>
+  <button class="chip" data-app="chrome"><span class="icon i-globe"></span><span>Chrome</span></button>
 </div>
 
 <div class="divider"></div>
@@ -64,6 +64,13 @@
   }
   document.querySelectorAll('[data-url]').forEach(function (b) {
     b.addEventListener('click', function () { go(b.getAttribute('data-url')); });
+  });
+  document.querySelectorAll('[data-app]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      window.chrome.webview.postMessage(JSON.stringify({
+        type: 'launch_app', app: b.getAttribute('data-app')
+      }));
+    });
   });
   var input = document.getElementById('src');
   input.value = localStorage.getItem('ab_download_source') || '';
