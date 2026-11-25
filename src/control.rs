@@ -12,6 +12,41 @@ use crate::protocol::{action_point, Command, MouseButton, Response, Viewport};
 
 pub const WINDOW_TITLE: &str = "Agent Browser — embedded OpenCode";
 
+/// Map a friendly key name to an enigo key. Returns None for printable
+/// characters, which are handled as `Key::Unicode`.
+fn named_key(name: &str) -> Option<Key> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "enter" | "return" => Key::Return,
+        "tab" => Key::Tab,
+        "space" | "spacebar" => Key::Space,
+        "esc" | "escape" => Key::Escape,
+        "backspace" => Key::Backspace,
+        "delete" | "del" => Key::Delete,
+        "home" => Key::Home,
+        "end" => Key::End,
+        "pageup" | "pgup" => Key::PageUp,
+        "pagedown" | "pgdn" => Key::PageDown,
+        "up" | "uparrow" => Key::UpArrow,
+        "down" | "downarrow" => Key::DownArrow,
+        "left" | "leftarrow" => Key::LeftArrow,
+        "right" | "rightarrow" => Key::RightArrow,
+        "capslock" => Key::CapsLock,
+        "f1" => Key::F1,
+        "f2" => Key::F2,
+        "f3" => Key::F3,
+        "f4" => Key::F4,
+        "f5" => Key::F5,
+        "f6" => Key::F6,
+        "f7" => Key::F7,
+        "f8" => Key::F8,
+        "f9" => Key::F9,
+        "f10" => Key::F10,
+        "f11" => Key::F11,
+        "f12" => Key::F12,
+        _ => return None,
+    })
+}
+
 pub struct Controller {
     viewport: Viewport,
     log_path: PathBuf,
@@ -30,6 +65,57 @@ impl Controller {
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
         self.viewport = viewport;
+    }
+
+    /// Press a key or chord such as "Enter", "Ctrl+C", "Shift+Tab", "F5",
+    /// or a single printable character. Modifiers are held only for the
+    /// duration of the key press.
+    fn dispatch_key(&mut self, key: &str) -> Response {
+        let mut parts: Vec<String> = key
+            .split('+')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect();
+        if parts.is_empty() {
+            return Response::Error { message: "empty key".into() };
+        }
+        let main = parts.pop().unwrap();
+        let mut modifiers = Vec::new();
+        for part in &parts {
+            let modifier = match part.to_ascii_lowercase().as_str() {
+                "ctrl" | "control" => Key::Control,
+                "shift" => Key::Shift,
+                "alt" => Key::Alt,
+                "meta" | "win" | "super" | "cmd" => Key::Meta,
+                other => {
+                    return Response::Error {
+                        message: format!("unsupported modifier: {other}"),
+                    }
+                }
+            };
+            modifiers.push(modifier);
+        }
+        let main_key = match named_key(&main) {
+            Some(k) => k,
+            None if main.chars().count() == 1 => Key::Unicode(main.chars().next().unwrap()),
+            None => {
+                return Response::Error {
+                    message: format!("unsupported key: {main}"),
+                }
+            }
+        };
+        for m in &modifiers {
+            let _ = self.enigo.key(*m, Direction::Press);
+        }
+        let result = self.enigo.key(main_key, Direction::Click);
+        for m in modifiers.iter().rev() {
+            let _ = self.enigo.key(*m, Direction::Release);
+        }
+        if result.is_ok() {
+            Response::Ok { message: format!("pressed {key}") }
+        } else {
+            Response::Error { message: format!("key {key} failed") }
+        }
     }
 
     /// Build the in-page check. The result is delivered through a WebView2
@@ -83,6 +169,11 @@ impl Controller {
             Command::TypeId { .. } => "type_id",
             Command::CloseTab { .. } => "close_tab",
             Command::Navigate { .. } => "navigate",
+            Command::NewTab { .. } => "new_tab",
+            Command::Back => "back",
+            Command::Forward => "forward",
+            Command::Reload => "reload",
+            Command::GetPolicy => "get_policy",
         };
         let line = format!("{{\"ts\":{ts},\"action\":\"{name}\",\"ok\":{ok}}}\n");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -140,9 +231,10 @@ impl Controller {
                 message: "Agent Browser is not foreground; bring it to the front".into(),
             };
         }
-        // Hard scope: every coordinate action must land inside the page viewport.
+        // Coordinate actions stay inside the page unless the user explicitly
+        // opts in with allow_outside_viewport in agent-policy.json.
         if let Some((x, y)) = action_point(cmd) {
-            if !self.viewport.contains(x, y) {
+            if !crate::policy::policy().allow_outside_viewport && !self.viewport.contains(x, y) {
                 self.log_command(cmd, false);
                 return Response::Error {
                     message: format!(
@@ -178,7 +270,7 @@ impl Controller {
                 }
             }
             Command::Click { x, y, button } => {
-                if is_password {
+                if is_password && !crate::policy::policy().allow_password_entry {
                     Response::Error { message: "refused: password field".into() }
                 } else {
                     let b = match button {
@@ -206,7 +298,7 @@ impl Controller {
                 }
             }
             Command::Type { text } => {
-                if is_password {
+                if is_password && !crate::policy::policy().allow_password_entry {
                     Response::Error { message: "refused: password field".into() }
                 } else if self.enigo.text(text).is_ok() {
                     Response::Ok { message: "typed".into() }
@@ -214,23 +306,7 @@ impl Controller {
                     Response::Error { message: "typing failed".into() }
                 }
             }
-            Command::Key { key } => match key.as_str() {
-                "Enter" => self.key_result(Key::Return),
-                "Tab" => self.key_result(Key::Tab),
-                "Escape" => self.key_result(Key::Escape),
-                "Backspace" => self.key_result(Key::Backspace),
-                "Ctrl+L" => {
-                    let _ = self.enigo.key(Key::Control, Direction::Press);
-                    let r = self.enigo.key(Key::Unicode('l'), Direction::Click);
-                    let _ = self.enigo.key(Key::Control, Direction::Release);
-                    if r.is_ok() {
-                        Response::Ok { message: "Ctrl+L".into() }
-                    } else {
-                        Response::Error { message: "Ctrl+L failed".into() }
-                    }
-                }
-                _ => Response::Error { message: format!("unsupported key: {key}") },
-            },
+            Command::Key { key } => self.dispatch_key(key),
             Command::ListTabs => Response::Tabs {
                 tabs: vec![crate::protocol::TabInfo {
                     index: 0,
@@ -251,7 +327,9 @@ impl Controller {
             Command::PageText | Command::PageElements | Command::ScrollDom { .. }
             | Command::ScrollIntoView { .. } | Command::Layout { .. }
             | Command::ClickId { .. } | Command::TypeId { .. }
-            | Command::CloseTab { .. } | Command::Navigate { .. } => Response::Error {
+            | Command::CloseTab { .. } | Command::Navigate { .. }
+            | Command::NewTab { .. } | Command::Back | Command::Forward
+            | Command::Reload | Command::GetPolicy => Response::Error {
                 message: "command must be handled by the GUI event loop".into(),
             },
         };
@@ -259,13 +337,5 @@ impl Controller {
         let ok = !matches!(response, Response::Error { .. });
         self.log_command(cmd, ok);
         response
-    }
-
-    fn key_result(&mut self, key: Key) -> Response {
-        if self.enigo.key(key, Direction::Click).is_ok() {
-            Response::Ok { message: "key pressed".into() }
-        } else {
-            Response::Error { message: "key press failed".into() }
-        }
     }
 }

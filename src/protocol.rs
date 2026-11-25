@@ -61,6 +61,16 @@ pub enum Command {
     CloseTab { index: usize },
     /// Navigate the active tab to an http(s) URL. Validated by the GUI.
     Navigate { url: String },
+    /// Open a new tab, optionally loading a URL into it.
+    NewTab { url: Option<String> },
+    /// Go back in the active tab's history.
+    Back,
+    /// Go forward in the active tab's history.
+    Forward,
+    /// Reload the active tab.
+    Reload,
+    /// Return the current agent autonomy policy as JSON.
+    GetPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

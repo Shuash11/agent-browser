@@ -98,6 +98,12 @@ pub struct UrlParams {
     pub url: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NewTabParams {
+    /// Optional http(s) URL (or bare host) to load in the new tab.
+    pub url: Option<String>,
+}
+
 fn pack(r: Result<Response, String>) -> Result<String, McpError> {
     match r {
         Ok(Response::Text { text }) => Ok(text),
@@ -261,6 +267,34 @@ impl BrowserService {
         Parameters(p): Parameters<UrlParams>,
     ) -> Result<String, McpError> {
         pack(ipc::call(Command::Navigate { url: p.url }).await)
+    }
+
+    #[tool(description = "Open a new tab, optionally loading an http(s) URL into it. Requires allow_new_tabs in agent-policy.json.")]
+    async fn browser_new_tab(
+        &self,
+        Parameters(p): Parameters<NewTabParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::NewTab { url: p.url }).await)
+    }
+
+    #[tool(description = "Go back one step in the active tab's history.")]
+    async fn browser_back(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::Back).await)
+    }
+
+    #[tool(description = "Go forward one step in the active tab's history.")]
+    async fn browser_forward(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::Forward).await)
+    }
+
+    #[tool(description = "Reload the active tab.")]
+    async fn browser_reload(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::Reload).await)
+    }
+
+    #[tool(description = "Read the current agent autonomy policy from agent-policy.json.")]
+    async fn browser_policy(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::GetPolicy).await)
     }
 }
 
