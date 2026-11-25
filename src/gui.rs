@@ -1078,6 +1078,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                 let p = ui_proxy.clone();
                                 let app_root = root.clone();
                                 let release = info.clone();
+                                let _ = terminal.evaluate_script(
+                                    "window.__setUpdateStatus('Downloading update…')");
+                                // Do NOT exit here: the updater script owns shutdown
+                                // after the download completes. Exiting now kills
+                                // this detached thread before it can install.
                                 std::thread::spawn(move || {
                                     let installer = std::env::temp_dir().join(format!(
                                         "agent-browser-{}-{}",
@@ -1109,8 +1114,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                         });
                                     }
                                 });
-                                session.terminate();
-                                *control_flow = ControlFlow::Exit;
                             }
                         }
                     }
