@@ -54,4 +54,13 @@ foreach ($f in $files) {
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
   Copy-Item $src $dest -Force
 }
-"staged $($files.Count) files into $stage"
+
+# policy() reads agent-policy.json beside the executable, which is installed
+# at target\release\agent-browser.exe — not at the installation root.
+$policySrc = Join-Path $root "agent-policy.json"
+if (-not (Test-Path $policySrc)) { throw "staging file missing: agent-policy.json" }
+$policyDest = Join-Path $stage "target\release\agent-policy.json"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $policyDest) | Out-Null
+Copy-Item $policySrc $policyDest -Force
+
+"staged $($files.Count + 1) files into $stage"

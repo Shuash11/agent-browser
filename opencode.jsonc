@@ -54,7 +54,12 @@
     { "action": "agent_browser_browser_close_tab", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_type_id", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_dock", "resource": "*", "effect": "allow" },
-    { "action": "agent_browser_browser_navigate", "resource": "*", "effect": "allow" }
+    { "action": "agent_browser_browser_navigate", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_new_tab", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_back", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_forward", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_reload", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_policy", "resource": "*", "effect": "allow" }
   ]
 }
 

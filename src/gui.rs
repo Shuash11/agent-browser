@@ -426,8 +426,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let fixture_url = Url::from_file_path(&fixture)
         .map_err(|_| format!("invalid fixture path: {}", fixture.display()))?
         .to_string();
-    let tab_urls = vec![newtab_url.to_string(), fixture_url,
-                        newtab_url.to_string(), newtab_url.to_string()];
+    // Spare hidden tab slots are created from the user's policy so the agent
+    // can genuinely open new tabs without rebuilding a WebView mid-session.
+    let max_tabs = crate::policy::policy().max_tabs.max(4);
+    let mut tab_urls = vec![newtab_url.to_string(), fixture_url,
+                            newtab_url.to_string(), newtab_url.to_string()];
+    while tab_urls.len() < max_tabs {
+        tab_urls.push(newtab_url.to_string());
+    }
     let mut tabs: Vec<wry::WebView> = Vec::new();
     for (i, url) in tab_urls.iter().enumerate() {
         let browser_proxy_tab = event_loop.create_proxy();
@@ -542,8 +548,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let mut active = 0usize;
     let mut titles = vec!["New Tab".to_string(), "Fixture".to_string(),
                           "New Tab".to_string(), "New Tab".to_string()];
+    while titles.len() < tab_urls.len() {
+        titles.push("New Tab".to_string());
+    }
     let mut urls = tab_urls.clone();
-    let mut closed = vec![false; tabs.len()];
+    let mut closed: Vec<bool> = (0..tabs.len()).map(|i| i >= 4).collect();
     let refresh_tabs = |tabs_w: &wry::WebView, titles: &Vec<String>, urls: &Vec<String>,
                         active: usize, closed: &Vec<bool>| {
         if let (Ok(t), Ok(u), Ok(c)) = (
@@ -628,12 +637,13 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                     if let crate::protocol::Command::CloseTab { index } = &cmd {
+                        let open_count = closed.iter().filter(|c| !**c).count();
                         let valid = *index < tabs.len() && !closed[*index]
-                            && closed.iter().filter(|c| !**c).count() > 1;
+                            && (open_count > 1 || crate::policy::policy().allow_close_last_tab);
                         controller.log_command(&cmd, valid);
                         if !valid {
                             let _ = reply.send(crate::protocol::Response::Error {
-                                message: "cannot close that tab (out of range, already closed, or last tab)".into(),
+                                message: "cannot close that tab (out of range, already closed, or last tab; set allow_close_last_tab to override)".into(),
                             });
                             return;
                         }
@@ -668,7 +678,8 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                     if let crate::protocol::Command::Navigate { url } = &cmd {
-                        let target_url = navigation_url(url);
+                        let allowed = crate::policy::policy().allow_url_navigation;
+                        let target_url = if allowed { navigation_url(url) } else { None };
                         let valid = target_url.is_some();
                         controller.log_command(&cmd, valid);
                         if let Some(u) = target_url {
@@ -680,9 +691,93 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             });
                         } else {
                             let _ = reply.send(crate::protocol::Response::Error {
-                                message: "URL must be a valid http(s) address".into(),
+                                message: if allowed {
+                                    "URL must be a valid http(s) address".into()
+                                } else {
+                                    "URL navigation is disabled in agent-policy.json".into()
+                                },
                             });
                         }
+                        return;
+                    }
+                    if let crate::protocol::Command::NewTab { url } = &cmd {
+                        let policy = crate::policy::policy();
+                        controller.log_command(&cmd, policy.allow_new_tabs);
+                        if !policy.allow_new_tabs {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "new tabs are disabled in agent-policy.json".into(),
+                            });
+                            return;
+                        }
+                        let Some(next) = closed.iter().position(|c| *c) else {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: format!(
+                                    "no free tab slot; close a tab or raise max_tabs (currently {}) in agent-policy.json",
+                                    tabs.len()
+                                ),
+                            });
+                            return;
+                        };
+                        let target = match url.as_deref() {
+                            Some(raw) => match navigation_url(raw) {
+                                Some(u) => u,
+                                None => {
+                                    let _ = reply.send(crate::protocol::Response::Error {
+                                        message: "URL must be a valid http(s) address".into(),
+                                    });
+                                    return;
+                                }
+                            },
+                            None => newtab_url.to_string(),
+                        };
+                        closed[next] = false;
+                        let _ = tabs[next].load_url(&target);
+                        urls[next] = target.clone();
+                        titles[next] = if target == newtab_url {
+                            "New Tab".into()
+                        } else {
+                            target.clone()
+                        };
+                        active = activate_tab(next, &tabs, &toolbar, &urls);
+                        layout_cache.dirty = true;
+                        refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
+                        let _ = reply.send(crate::protocol::Response::Ok {
+                            message: format!("opened tab {next} at {target}"),
+                        });
+                        return;
+                    }
+                    if matches!(cmd, crate::protocol::Command::Back) {
+                        controller.log_command(&cmd, true);
+                        let _ = tabs[active].go_back();
+                        layout_cache.dirty = true;
+                        let _ = reply.send(crate::protocol::Response::Ok {
+                            message: "went back".into(),
+                        });
+                        return;
+                    }
+                    if matches!(cmd, crate::protocol::Command::Forward) {
+                        controller.log_command(&cmd, true);
+                        let _ = tabs[active].go_forward();
+                        layout_cache.dirty = true;
+                        let _ = reply.send(crate::protocol::Response::Ok {
+                            message: "went forward".into(),
+                        });
+                        return;
+                    }
+                    if matches!(cmd, crate::protocol::Command::Reload) {
+                        controller.log_command(&cmd, true);
+                        let _ = tabs[active].reload();
+                        layout_cache.dirty = true;
+                        let _ = reply.send(crate::protocol::Response::Ok {
+                            message: "reloaded".into(),
+                        });
+                        return;
+                    }
+                    if matches!(cmd, crate::protocol::Command::GetPolicy) {
+                        controller.log_command(&cmd, true);
+                        let _ = reply.send(crate::protocol::Response::Text {
+                            text: crate::policy::policy().as_json(),
+                        });
                         return;
                     }
                     if let crate::protocol::Command::Dock { mode } = &cmd {
@@ -911,7 +1006,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "close" => {
                         if let Some(i) = index.filter(|i| *i < tabs.len() && !closed[*i]) {
-                            if closed.iter().filter(|c| !**c).count() <= 1 { return; }
+                            if closed.iter().filter(|c| !**c).count() <= 1
+                                && !crate::policy::policy().allow_close_last_tab
+                            {
+                                return;
+                            }
                             closed[i] = true;
                             tabs[i].set_visible(false).ok();
                             if active == i {
@@ -1033,11 +1132,10 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
 
-                    let output = if is_scan {
-                        converted.to_string()
-                    } else {
-                        converted.get(0).and_then(|v| v.as_str()).unwrap_or("").to_string()
-                    };
+                    // page_text and scroll_into_view both return a JSON object
+                    // string from JS; after unwrapping once `converted` is that
+                    // object. Indexing [0] used to yield an empty string.
+                    let output = converted.to_string();
                     let _ = reply.send(crate::protocol::Response::Text { text: output });
                 }
                 crate::ipc::UserEvent::WindowAction { action } => {

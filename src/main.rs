@@ -4,6 +4,7 @@ mod control;
 mod gui;
 mod ipc;
 mod mcp;
+mod policy;
 mod protocol;
 mod terminal;
 mod updater;

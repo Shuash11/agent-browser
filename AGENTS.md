@@ -21,19 +21,23 @@ Use the MCP tools provided by the `agent-browser` server:
 - `browser_page_elements` — raw element list; use only when you need extra detail beyond the cached layout.
 - `browser_scroll_into_view {text}` — jump to a known element by its visible text; `browser_scroll_dom {dx,dy}` for pixel scrolling.
 - `browser_get_viewport` — physical-screen rectangle of the page area
-- `browser_move`, `browser_click`, `browser_scroll`, `browser_type`, `browser_key`
-- `browser_navigate {url}` — open a URL in the active tab inside the harness. Accepts a full `http(s)://` URL or a bare host like `example.com` (prefixed with `https://`). Other schemes are rejected; it does not create a new tab.
-- `browser_list_tabs`, `browser_focus_tab`, `browser_close_tab {index}` — switch or close tabs; the last open tab cannot be closed.
+- `browser_move`, `browser_click`, `browser_scroll`, `browser_type`, `browser_key {key}` — `key` accepts named keys (`Enter`, `Tab`, `F5`, `ArrowDown`, …), printable characters, and chords (`Ctrl+C`, `Shift+Tab`, `Alt+Left`).
+- `browser_navigate {url}` — open a URL in the active tab. Accepts a full `http(s)://` URL or a bare host like `example.com` (prefixed with `https://`). Other schemes are rejected.
+- `browser_new_tab {url?}` — open a new tab, optionally loading a URL. `browser_back`, `browser_forward`, `browser_reload` — navigate history / reload the active tab.
+- `browser_list_tabs`, `browser_focus_tab`, `browser_close_tab {index}` — switch or close tabs. Closing the last tab requires `allow_close_last_tab`.
+- `browser_policy` — read the current autonomy policy. Call it when you need to know what is enabled.
 - `browser_dock` — dock the terminal left or bottom when the user asks
 - `browser_screenshot` — capture the page viewport to a PNG path. Use **only** to verify visual state or for canvas/images/rendering problems; do not use it just to locate buttons or read text. Screenshots cost far more tokens than text.
 
-## Hard scope rules
+## Policy-driven scope rules
 
-1. Act **only inside the page viewport**. Coordinates outside it are rejected.
-2. **Navigation is allowed via `browser_navigate {url}` only.** Use it when the user asks you to open a site; it changes the active tab inside the harness. There is no tool to create a new tab from a URL — use `browser_list_tabs` / `browser_focus_tab` to choose the tab first. The harness bundles no third-party downloader and does not bypass any site's terms; downloading, rights, and safety on destination sites remain the user's responsibility.
-3. Password inputs are refused by policy. Never try to read, type, or bypass credentials.
+The harness is flexible: limits live in `agent-policy.json` beside the executable, not hardcoded in the agent. Call `browser_policy` to see the active values. The user controls them; never edit that file yourself.
+
+1. **Viewport:** coordinate actions must land inside the page viewport unless the user enables `allow_outside_viewport`. Prefer the tab/navigation tools over OS-level clicks.
+2. **Navigation:** use `browser_navigate {url}` and `browser_new_tab {url?}` freely when the user asks. Navigation can be disabled with `allow_url_navigation`, and new tabs with `allow_new_tabs`. The harness bundles no third-party downloader and does not bypass any site's terms; downloading, rights, and safety on destination sites remain the user's responsibility.
+3. **Credentials:** password fields are refused unless the user enables `allow_password_entry`. Never read, exfiltrate, or bypass credentials even when it is enabled.
 4. Use `browser_layout` once to locate controls, then `browser_click_id` / `browser_type_id` to act. Use `browser_scroll_into_view` to reach off-screen text. Take a screenshot only when visual verification is genuinely needed.
-5. All actions are logged locally; do not modify logs or policy code to bypass checks.
+5. All actions are logged locally; do not modify logs or the policy file to bypass checks.
 6. Never publish, submit, purchase, or **install updates** without explicit user approval. Updates are user-only via the terminal header button; no MCP tool exposes them.
 
 ## Coordination with the user
