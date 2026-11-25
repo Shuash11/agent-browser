@@ -92,6 +92,12 @@ pub struct ScrollDomParams {
     pub dy: i32,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UrlParams {
+    /// Absolute http(s) URL, or a bare host such as example.com.
+    pub url: String,
+}
+
 fn pack(r: Result<Response, String>) -> Result<String, McpError> {
     match r {
         Ok(Response::Text { text }) => Ok(text),
@@ -247,6 +253,14 @@ impl BrowserService {
         Parameters(p): Parameters<DockParams>,
     ) -> Result<String, McpError> {
         pack(ipc::call(Command::Dock { mode: p.mode }).await)
+    }
+
+    #[tool(description = "Navigate the active tab to an http(s) URL inside the harness. Accepts a full URL or a bare host.")]
+    async fn browser_navigate(
+        &self,
+        Parameters(p): Parameters<UrlParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::Navigate { url: p.url }).await)
     }
 }
 

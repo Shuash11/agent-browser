@@ -59,6 +59,8 @@ pub enum Command {
     TypeId { id: String, text: String },
     /// Close a tab by its stable index.
     CloseTab { index: usize },
+    /// Navigate the active tab to an http(s) URL. Validated by the GUI.
+    Navigate { url: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -116,6 +118,15 @@ mod tests {
     fn command_round_trip() {
         let cmd = Command::Click { x: 12, y: 34, button: MouseButton::Right };
         let json = serde_json::to_string(&cmd).unwrap();
+        let back: Command = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cmd);
+    }
+
+    #[test]
+    fn navigate_command_round_trip() {
+        let cmd = Command::Navigate { url: "https://example.com".into() };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert!(json.contains("navigate"));
         let back: Command = serde_json::from_str(&json).unwrap();
         assert_eq!(back, cmd);
     }

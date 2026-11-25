@@ -32,6 +32,31 @@ fn rect(x: i32, y: i32, w: i32, h: i32) -> wry::Rect {
     }
 }
 
+/// Normalize a user- or agent-supplied destination into a safe http(s) URL.
+/// Bare hosts get an `https://` prefix; anything with another scheme or no
+/// host is rejected. Shared by the toolbar and the MCP navigation tool so
+/// there is a single validation path.
+fn navigation_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let candidate = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+    match Url::parse(&candidate) {
+        Ok(u)
+            if (u.scheme() == "http" || u.scheme() == "https")
+                && !u.host_str().unwrap_or("").is_empty() =>
+        {
+            Some(u.to_string())
+        }
+        _ => None,
+    }
+}
+
 const WINDOW_W: i32 = 1600;
 const WINDOW_H: i32 = 900;
 const MIN_WINDOW_W: u32 = 1100;
@@ -642,6 +667,24 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         return;
                     }
+                    if let crate::protocol::Command::Navigate { url } = &cmd {
+                        let target_url = navigation_url(url);
+                        let valid = target_url.is_some();
+                        controller.log_command(&cmd, valid);
+                        if let Some(u) = target_url {
+                            let _ = tabs[active].load_url(&u);
+                            layout_cache.dirty = true;
+                            let _ = toolbar.evaluate_script("window.__setStatus('')");
+                            let _ = reply.send(crate::protocol::Response::Ok {
+                                message: format!("navigating active tab to {u}"),
+                            });
+                        } else {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "URL must be a valid http(s) address".into(),
+                            });
+                        }
+                        return;
+                    }
                     if let crate::protocol::Command::Dock { mode } = &cmd {
                         let valid = matches!(mode.as_str(), "left" | "bottom" | "toggle");
                         controller.log_command(&cmd, valid);
@@ -826,13 +869,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     match kind.as_str() {
                         "navigate" => {
                             let raw = value.unwrap_or_default();
-                            let candidate = if raw.contains("://") { raw.clone() } else { format!("https://{raw}") };
-                            match Url::parse(&candidate) {
-                                Ok(u) if u.scheme() == "http" || u.scheme() == "https" => {
-                                    let _ = tabs[target].load_url(u.as_str());
-                                    let _ = toolbar.evaluate_script("window.__setStatus('')");
-                                }
-                                _ => { let _ = toolbar.evaluate_script("window.__setStatus('Use http(s)')"); }
+                            if let Some(u) = navigation_url(&raw) {
+                                let _ = tabs[target].load_url(&u);
+                                let _ = toolbar.evaluate_script("window.__setStatus('')");
+                            } else {
+                                let _ = toolbar.evaluate_script("window.__setStatus('Use http(s)')");
                             }
                         }
                         "back" => { let _ = tabs[target].go_back(); }
