@@ -25,15 +25,28 @@ pub fn check_latest() -> Result<Option<ReleaseInfo>, String> {
         .timeout_global(Some(std::time::Duration::from_secs(15)))
         .build()
         .new_agent();
-    let body = agent
-        .get(RELEASES_API)
-        .header("User-Agent", "agent-browser-updater")
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|e| format!("update check failed: {e}"))?
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| format!("read release JSON failed: {e}"))?;
+    let mut body = String::new();
+    let mut last_error = String::new();
+    for attempt in 0..3 {
+        match agent
+            .get(RELEASES_API)
+            .header("User-Agent", "agent-browser-updater")
+            .header("Accept", "application/vnd.github+json")
+            .call()
+        {
+            Ok(response) => match response.into_body().read_to_string() {
+                Ok(text) => { body = text; break; }
+                Err(e) => last_error = format!("read release JSON failed: {e}"),
+            },
+            Err(e) => last_error = format!("update check failed: {e}"),
+        }
+        if attempt < 2 {
+            std::thread::sleep(std::time::Duration::from_millis(400 + attempt * 600));
+        }
+    }
+    if body.is_empty() {
+        return Err(last_error);
+    }
     let json: serde_json::Value =
         serde_json::from_str(&body).map_err(|e| format!("invalid release JSON: {e}"))?;
 

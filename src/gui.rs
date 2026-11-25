@@ -1036,7 +1036,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     match result {
                         Err(msg) => {
-                            let _ = terminal.evaluate_script("window.__setUpdateStatus('Check failed')");
+                            let short: String = msg.chars().take(70).collect();
+                            if let Ok(js) = serde_json::to_string(&format!("Check failed: {short}")) {
+                                let _ = terminal.evaluate_script(
+                                    &format!("window.__setUpdateStatus({js})"));
+                            }
                             message_box(
                                 &format!("Could not check for updates.\n\n{msg}"),
                                 "Agent Browser",
