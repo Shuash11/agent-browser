@@ -45,6 +45,13 @@ Verified on Rust 1.99.1 / Windows 11 / WebView2 157.
    - `browser_new_tab {url?}`, `browser_back`, `browser_forward`, `browser_reload` — open a tab, navigate history, or reload. New tabs create a real WebView, so there is no tab cap.
    - `browser_policy {reload?}` — read the autonomy policy; set `reload:true` after editing the file to apply changes immediately.
    - `browser_focus` — bring the harness window forward. Focus is best-effort and never blocks input tools.
+   - `browser_model_status`, `browser_model_load {path}`, `browser_model_use {provider}`, `browser_model_stop` — host a local GGUF and switch OpenCode between local and cloud.
+
+## Local model (confidential work)
+
+Click **+ Model** in the terminal header to open the draggable model panel, then drop a `.gguf` onto it (or click to browse). The harness extracts its bundled, hash-verified llama.cpp CPU runtime and serves the model at `http://127.0.0.1:8080` — loopback only, nothing leaves the machine. Use **Use local** / **Use cloud** to switch OpenCode providers; the harness writes the matching config and reloads OpenCode. You can still type in the shell manually at any time.
+
+A small 2B model may not reliably emit tool calls, so local mode is best for confidential drafting rather than full agent automation.
 
 ## Autonomy policy
 

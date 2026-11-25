@@ -20,7 +20,8 @@
   #bar strong { color:var(--accent); font-size:11px; font-weight:600; }
   #bar .sub { color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden;
               text-overflow:ellipsis; }
-  #dock, #update { min-height:24px; padding:2px 8px; font-size:11px; }
+  #dock, #update, #modelToggle { min-height:24px; padding:2px 8px; font-size:11px; }
+  #modelToggle { margin-left:auto; }
   #term { position:absolute; top:36px; left:0; right:0; bottom:0; padding:var(--space-2); }
   #term .xterm { padding:4px; }
 </style>
@@ -36,7 +37,8 @@
   <span class="sub">local PTY</span>
   <button id="update" aria-label="Check for updates">Updates</button>
   <span class="sub" id="update-status" role="status" aria-live="polite"></span>
-  <button id="dock" aria-label="Toggle terminal dock position" style="margin-left:auto">Dock: Left</button>
+  <button id="modelToggle" aria-label="Toggle local model panel">+ Model</button>
+  <button id="dock" aria-label="Toggle terminal dock position">Dock: Left</button>
 </div>
 <div id="term"></div>
 <script>
@@ -46,6 +48,10 @@
       'Dock: ' + (mode === 'bottom' ? 'Bottom' : 'Left');
   };
   document.getElementById('dock').addEventListener('click', function () { send({ type: 'dock' }); });
+  document.getElementById('modelToggle').addEventListener('click', function () { send({ type: 'model_toggle' }); });
+  window.__setModelVisible = function (v) {
+    document.getElementById('modelToggle').textContent = v ? '− Model' : '+ Model';
+  };
   document.getElementById('update').addEventListener('click', function () { send({ type: 'update_check' }); });
   document.querySelectorAll('.traffic button').forEach(function (b) {
     b.addEventListener('click', function () { send({ type: 'window_action', action: b.dataset.action }); });

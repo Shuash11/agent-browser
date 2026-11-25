@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="/icons.css">
+<style>
+  html,body{margin:0;height:100%;background:#1c1c1e;color:#e6e6e6;
+    font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden}
+  .wrap{padding:10px 12px;height:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:8px}
+  .title{font-weight:600;color:#fff;display:flex;align-items:center;gap:6px}
+  .title i{color:#0a84ff;font-style:normal}
+  #drop{flex:1;min-height:46px;border:1px dashed #48484a;border-radius:9px;
+    display:flex;align-items:center;justify-content:center;text-align:center;
+    padding:8px;color:#9a9a9e;background:#232325;transition:.15s}
+  #drop.over{border-color:#0a84ff;background:#1d2a3a;color:#cfe6ff}
+  .row{display:flex;gap:6px;flex-wrap:wrap}
+  button,label.btn{border:0;border-radius:7px;background:#3a3a3c;color:#f2f2f7;
+    padding:5px 10px;font-size:12px;cursor:pointer}
+  button:hover,label.btn:hover{background:#4a4a4c}
+  button.primary{background:#0a84ff;color:#fff}
+  button.primary:hover{background:#3395ff}
+  #status{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#8e8e93;
+    white-space:pre-wrap;word-break:break-all;max-height:96px;overflow:auto}
+  input[type=file]{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title"><i>&#9679;</i> Local model</div>
+  <div id="drop">Drop a .gguf file here<br>or click to browse</div>
+  <input id="file" type="file" accept=".gguf">
+  <div class="row">
+    <button class="primary" id="useLocal">Use local</button>
+    <button id="useCloud">Use cloud</button>
+    <button id="stop">Stop model</button>
+    <label class="btn" for="file">Browse</label>
+  </div>
+  <div id="status">No model loaded</div>
+</div>
+<script>
+function post(kind, value){
+  try{ window.chrome.webview.postMessage(JSON.stringify({type:kind, value:value})); }catch(e){}
+}
+var drop=document.getElementById('drop'), file=document.getElementById('file');
+drop.addEventListener('click',function(){file.click();});
+file.addEventListener('change',function(){if(file.files&&file.files[0])post('model_load',file.files[0].path||'');});
+['dragenter','dragover'].forEach(function(t){drop.addEventListener(t,function(e){
+  e.preventDefault();drop.classList.add('over');});});
+['dragleave','drop'].forEach(function(t){drop.addEventListener(t,function(e){
+  e.preventDefault();drop.classList.remove('over');});});
+drop.addEventListener('drop',function(e){
+  var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+  if(f){ var p=f.path||''; post('model_load',p); }
+});
+document.getElementById('useLocal').addEventListener('click',function(){post('model_use','local');});
+document.getElementById('useCloud').addEventListener('click',function(){post('model_use','cloud');});
+document.getElementById('stop').addEventListener('click',function(){post('model_stop','');});
+window.__setModelStatus=function(s){
+  if(typeof s==='string'){ try{ s=JSON.parse(s); }catch(e){} }
+  try{ document.getElementById('status').textContent=JSON.stringify(s,null,2); }catch(e){}
+};
+</script>
+</body>
+</html>

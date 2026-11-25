@@ -26,6 +26,7 @@ Use the MCP tools provided by the `agent-browser` server:
 - `browser_new_tab {url?}` — open a new tab (creates a real WebView, no tab cap). `browser_back`, `browser_forward`, `browser_reload` — history / reload.
 - `browser_list_tabs`, `browser_focus_tab`, `browser_close_tab {index}` — switch or close tabs, including the last one.
 - `browser_policy {reload?}` — read the autonomy policy; use `reload:true` after the user edits the file. `browser_focus` — bring the window forward if input lands elsewhere.
+- `browser_model_status`, `browser_model_load {path}`, `browser_model_use {provider}`, `browser_model_stop` — local GGUF hosting and cloud/local provider switching. The user opens the panel with "+ Model".
 - `browser_dock` — dock the terminal left or bottom when the user asks
 - `browser_screenshot` — capture the page viewport to a PNG path. Use **only** to verify visual state or for canvas/images/rendering problems; do not use it just to locate buttons or read text. Screenshots cost far more tokens than text.
 

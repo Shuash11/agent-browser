@@ -73,6 +73,14 @@ pub enum Command {
     GetPolicy { reload: bool },
     /// Bring the Agent Browser window to the foreground.
     Focus,
+    /// Return local model status as JSON.
+    ModelStatus,
+    /// Load a GGUF file into the bundled local server.
+    ModelLoad { path: String },
+    /// Switch OpenCode between cloud and local providers.
+    ModelUse { provider: String },
+    /// Stop the local model server.
+    ModelStop,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

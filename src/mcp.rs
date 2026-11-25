@@ -110,6 +110,18 @@ pub struct PolicyParams {
     pub reload: Option<bool>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ModelPathParams {
+    /// Absolute path to a .gguf model file.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ModelProviderParams {
+    /// cloud or local
+    pub provider: String,
+}
+
 fn pack(r: Result<Response, String>) -> Result<String, McpError> {
     match r {
         Ok(Response::Text { text }) => Ok(text),
@@ -309,6 +321,32 @@ impl BrowserService {
     #[tool(description = "Bring the Agent Browser window to the foreground so input tools can reach it.")]
     async fn browser_focus(&self) -> Result<String, McpError> {
         pack(ipc::call(Command::Focus).await)
+    }
+
+    #[tool(description = "Read local model status: configured GGUF, provider, running state, port.")]
+    async fn browser_model_status(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::ModelStatus).await)
+    }
+
+    #[tool(description = "Load a .gguf model into the bundled local llama.cpp server and switch OpenCode to it.")]
+    async fn browser_model_load(
+        &self,
+        Parameters(p): Parameters<ModelPathParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::ModelLoad { path: p.path }).await)
+    }
+
+    #[tool(description = "Switch OpenCode between cloud (NVIDIA GLM) and local GGUF providers.")]
+    async fn browser_model_use(
+        &self,
+        Parameters(p): Parameters<ModelProviderParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::ModelUse { provider: p.provider }).await)
+    }
+
+    #[tool(description = "Stop the local model server.")]
+    async fn browser_model_stop(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::ModelStop).await)
     }
 }
 

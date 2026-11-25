@@ -175,6 +175,10 @@ impl Controller {
             Command::Reload => "reload",
             Command::GetPolicy { .. } => "get_policy",
             Command::Focus => "focus",
+            Command::ModelStatus => "model_status",
+            Command::ModelLoad { .. } => "model_load",
+            Command::ModelUse { .. } => "model_use",
+            Command::ModelStop => "model_stop",
         };
         let line = format!("{{\"ts\":{ts},\"action\":\"{name}\",\"ok\":{ok}}}\n");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -359,7 +363,9 @@ impl Controller {
             | Command::ClickId { .. } | Command::TypeId { .. }
             | Command::CloseTab { .. } | Command::Navigate { .. }
             | Command::NewTab { .. } | Command::Back | Command::Forward
-            | Command::Reload | Command::GetPolicy { .. } => Response::Error {
+            | Command::Reload | Command::GetPolicy { .. }
+            | Command::ModelStatus | Command::ModelLoad { .. } | Command::ModelUse { .. }
+            | Command::ModelStop => Response::Error {
                 message: "command must be handled by the GUI event loop".into(),
             },
         };

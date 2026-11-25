@@ -54,6 +54,13 @@ pub enum UserEvent {
     WindowAction { action: String },
     /// A tab finished loading; used to sync the address bar and tab strip.
     PageLoaded { url: String, tab: usize },
+    /// Action from the draggable local-model panel.
+    ModelAction { kind: String, value: Option<String> },
+    /// Background model load finished.
+    ModelLoaded {
+        result: Result<String, String>,
+        reply: Option<oneshot::Sender<crate::protocol::Response>>,
+    },
 }
 
 pub fn pipe_name() -> String {
@@ -115,7 +122,7 @@ pub async fn serve(proxy: tao::event_loop::EventLoopProxy<UserEvent>) -> Result<
         if proxy.send_event(UserEvent::Ipc { cmd, reply: tx }).is_err() {
             break; // event loop gone
         }
-        let reply = tokio::time::timeout(Duration::from_secs(30), rx).await;
+        let reply = tokio::time::timeout(Duration::from_secs(180), rx).await;
         let response = match reply {
             Ok(Ok(response)) => response,
             Ok(Err(_)) => Response::Error { message: "GUI dropped the request".into() },

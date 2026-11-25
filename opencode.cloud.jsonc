@@ -1,0 +1,91 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "nvidia-glm/glm-5.3-flash",
+  "providers": {
+    "nvidia-glm": {
+      "name": "NVIDIA GLM",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "env": ["NVIDIA_API_KEY"],
+      "settings": {
+        "baseURL": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "{env:NVIDIA_API_KEY}",
+        "timeout": 300000,
+        "headerTimeout": 120000
+      },
+      "body": { "reasoning_effort": "high" },
+      "models": {
+        "glm-5.3-flash": {
+          "name": "GLM-5.3-Flash (NVIDIA)",
+          "modelID": "z-ai/glm-5.3-flash",
+          "capabilities": {
+            "tools": true,
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "limit": { "context": 1000000, "output": 8192 }
+        }
+      }
+    },
+    "local": {
+      "name": "Local GGUF (llama.cpp)",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "settings": {
+        "baseURL": "http://127.0.0.1:8080/v1",
+        "apiKey": "local",
+        "timeout": 300000,
+        "headerTimeout": 120000
+      },
+      "models": {
+        "local-model": {
+          "name": "Local GGUF",
+          "modelID": "local-model",
+          "capabilities": {
+            "tools": true,
+            "input": ["text"],
+            "output": ["text"]
+          },
+          "limit": { "context": 4096, "output": 2048 }
+        }
+      }
+    }
+  },
+  "mcp": {
+    "servers": {
+      "agent-browser": {
+        "type": "local",
+        "command": ["./target/release/agent-browser.exe", "mcp"],
+        "cwd": ".",
+        "timeout": { "startup": 45000, "execution": 60000 }
+      }
+    }
+  },
+  "permissions": [
+    { "action": "read", "resource": "*.env", "effect": "ask" },
+    { "action": "read", "resource": "*.env.*", "effect": "ask" },
+    { "action": "agent_browser_browser_screenshot", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_get_viewport", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_list_tabs", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_move", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_click", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_scroll", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_type", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_key", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_focus_tab", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_layout", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_click_id", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_close_tab", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_type_id", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_dock", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_navigate", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_new_tab", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_back", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_forward", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_reload", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_policy", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_focus", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_model_status", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_model_load", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_model_use", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_model_stop", "resource": "*", "effect": "allow" }
+  ]
+}

@@ -3,6 +3,7 @@
 mod control;
 mod gui;
 mod ipc;
+mod local_model;
 mod mcp;
 mod policy;
 mod protocol;

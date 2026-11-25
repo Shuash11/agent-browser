@@ -1,4 +1,4 @@
-//! GUI shell: embedded OpenCode terminal, browser toolbar, multi-tab page area,
+﻿//! GUI shell: embedded OpenCode terminal, browser toolbar, multi-tab page area,
 //! right-edge tab strip, draggable splitter, and a virtual agent cursor.
 
 use std::fs;
@@ -178,6 +178,7 @@ fn serve_abterm(assets: &Path, request: &wry::http::Request<Vec<u8>>) -> wry::ht
             "/toolbar.html" => ("toolbar.html", "text/html"),
             "/newtab.html" => ("newtab.html", "text/html"),
             "/tabs.html" => ("tabs.html", "text/html"),
+            "/model.html" => ("model.html", "text/html"),
             "/icons.css" => ("icons.css", "text/css"),
             "/theme.css" => ("theme.css", "text/css"),
             _ => ("index.html", "text/html"),
@@ -189,6 +190,12 @@ fn serve_abterm(assets: &Path, request: &wry::http::Request<Vec<u8>>) -> wry::ht
         .header("cache-control", "no-store")
         .body(std::borrow::Cow::Owned(bytes))
         .unwrap()
+}
+
+fn push_model_status(panel: &wry::WebView, model: &crate::local_model::LocalModel) {
+    if let Ok(js) = serde_json::to_string(&model.status()) {
+        let _ = panel.evaluate_script(&format!("window.__setModelStatus({js})"));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -293,6 +300,9 @@ fn layout_bounds(
     h: i32,
     terminal: &wry::WebView,
     divider: &wry::WebView,
+    model_panel: &wry::WebView,
+    model_divider: &wry::WebView,
+    model_size: i32,
     toolbar: &wry::WebView,
     tabs: &[wry::WebView],
     tab_strip: &wry::WebView,
@@ -305,7 +315,15 @@ fn layout_bounds(
         let ts = term_size.min(max_term).max(MIN_TERM);
         let area_x = ts + DIVIDER_W;
         let area_w = w - area_x - TAB_W;
-        terminal.set_bounds(rect(0, 0, ts, h)).ok();
+        let mh = if model_size <= 0 { 0 } else { model_size.clamp(120, (h - 240).max(120)) };
+        let gap = if mh > 0 { DIVIDER_W } else { 0 };
+        terminal.set_bounds(rect(0, 0, ts, h - mh - gap)).ok();
+        model_panel.set_visible(mh > 0).ok();
+        model_divider.set_visible(mh > 0).ok();
+        if mh > 0 {
+            model_divider.set_bounds(rect(0, h - mh - gap, ts, DIVIDER_W)).ok();
+            model_panel.set_bounds(rect(0, h - mh, ts, mh)).ok();
+        }
         divider.set_bounds(rect(ts, 0, DIVIDER_W, h)).ok();
         toolbar.set_bounds(rect(area_x, 0, area_w, TOOLBAR_H)).ok();
         for tab in tabs { tab.set_bounds(rect(area_x, TOOLBAR_H, area_w, h - TOOLBAR_H)).ok(); }
@@ -319,9 +337,18 @@ fn layout_bounds(
         let max_term = (h * 40 / 100).max(180).min(h - 300);
         let ts = term_size.min(max_term).max(180);
         let area_h = h - ts - DIVIDER_W - TOOLBAR_H;
-        terminal.set_bounds(rect(0, h - ts, w - TAB_W, ts)).ok();
-        divider.set_bounds(rect(0, h - ts - DIVIDER_W, w - TAB_W, DIVIDER_W)).ok();
-        toolbar.set_bounds(rect(0, 0, w - TAB_W, TOOLBAR_H)).ok();
+        let bottom_w = w - TAB_W;
+        let mw = if model_size <= 0 { 0 } else { model_size.clamp(260, (bottom_w - 420).max(260)) };
+        let gap = if mw > 0 { DIVIDER_W } else { 0 };
+        terminal.set_bounds(rect(0, h - ts, bottom_w - mw - gap, ts)).ok();
+        model_panel.set_visible(mw > 0).ok();
+        model_divider.set_visible(mw > 0).ok();
+        if mw > 0 {
+            model_divider.set_bounds(rect(bottom_w - mw - gap, h - ts, DIVIDER_W, ts)).ok();
+            model_panel.set_bounds(rect(bottom_w - mw, h - ts, mw, ts)).ok();
+        }
+        divider.set_bounds(rect(0, h - ts - DIVIDER_W, bottom_w, DIVIDER_W)).ok();
+        toolbar.set_bounds(rect(0, 0, bottom_w, TOOLBAR_H)).ok();
         for tab in tabs { tab.set_bounds(rect(0, TOOLBAR_H, w - TAB_W, area_h)).ok(); }
         crate::protocol::Viewport {
             x: origin.x,
@@ -400,6 +427,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         &opencode_prog, &arg_refs, &root, term_proxy,
     )?;
     let writer = session.writer_handle();
+    let model_writer = writer.clone();
     let resize_session = session.clone();
     let term_proxy_ipc = event_loop.create_proxy();
     let term_dir = root.join("assets").join("terminal");
@@ -435,6 +463,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     Some("dock") => {
                         let _ = term_proxy_ipc.send_event(crate::ipc::UserEvent::SetDock {
                             mode: "toggle".into(),
+                        });
+                    }
+                    Some("model_toggle") => {
+                        let _ = term_proxy_ipc.send_event(crate::ipc::UserEvent::ModelAction {
+                            kind: "model_toggle".into(), value: None,
                         });
                     }
                     Some("update_check") => {
@@ -537,10 +570,57 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         })
         .build_as_child(&window)?;
 
+    // --- local model panel with its own draggable divider ---
+    let model_proxy = event_loop.create_proxy();
+    let model_ready_proxy = event_loop.create_proxy();
+    let model_assets = term_dir.clone();
+    let model_panel = WebViewBuilder::new_with_web_context(&mut context)
+        .with_bounds(rect(0, WINDOW_H - 220, TERMINAL_W, 220))
+        .with_custom_protocol("abterm".into(), move |_id, request| {
+            serve_abterm(&model_assets, &request)
+        })
+        .with_url("http://abterm.localhost/model.html")
+        .with_on_page_load_handler(move |_event, _url| {
+            let _ = model_ready_proxy.send_event(crate::ipc::UserEvent::ModelAction {
+                kind: "model_ready".into(), value: None,
+            });
+        })
+        .with_ipc_handler(move |request| {
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(request.body()) {
+                let kind = msg.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let value = msg.get("value").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let _ = model_proxy.send_event(crate::ipc::UserEvent::ModelAction { kind, value });
+            }
+        })
+        .build_as_child(&window)?;
+
+    let model_div_proxy = event_loop.create_proxy();
+    let model_div_assets = term_dir.clone();
+    let model_divider = WebViewBuilder::new_with_web_context(&mut context)
+        .with_bounds(rect(0, WINDOW_H - 228, TERMINAL_W, DIVIDER_W))
+        .with_custom_protocol("abterm".into(), move |_id, request| {
+            serve_abterm(&model_div_assets, &request)
+        })
+        .with_url("http://abterm.localhost/divider.html")
+        .with_ipc_handler(move |request| {
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(request.body()) {
+                if msg.get("type").and_then(|v| v.as_str()) == Some("split") {
+                    let delta = msg.get("delta").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let _ = model_div_proxy.send_event(crate::ipc::UserEvent::ModelAction {
+                        kind: "model_split".into(), value: Some(delta.to_string()),
+                    });
+                }
+            }
+        })
+        .build_as_child(&window)?;
+
+    let local_model = Arc::new(crate::local_model::LocalModel::new(root.clone()));
+
     let mut scale = window.scale_factor();
     let mut origin = window.inner_position()?;
+    let mut model_size = 0; // hidden until the user clicks "+ Model"
     let viewport = layout_bounds("left", TERMINAL_W, WINDOW_W, WINDOW_H,
-        &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale);
+        &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale);
     let mut controller = crate::control::Controller::new(viewport.clone(), logs.join("actions.jsonl"))?;
     let proxy = event_loop.create_proxy();
     std::thread::spawn(move || {
@@ -599,14 +679,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 win_h = (size.height as f64 / scale) as i32;
                 layout_cache.dirty = true;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
-                    &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
+                    &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
                 let _ = terminal.evaluate_script("window.__fit && window.__fit()");
             }
             tao::event::Event::WindowEvent { event: tao::event::WindowEvent::Moved(pos), .. } => {
                 origin = pos;
                 layout_cache.dirty = true;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
-                    &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
+                    &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
             }
             tao::event::Event::WindowEvent {
                 event: tao::event::WindowEvent::ScaleFactorChanged { scale_factor, .. }, ..
@@ -614,7 +694,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 scale = scale_factor;
                 layout_cache.dirty = true;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
-                    &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
+                    &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
                 let _ = terminal.evaluate_script("window.__fit && window.__fit()");
             }
             tao::event::Event::UserEvent(ev) => match ev {
@@ -768,7 +848,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         controller.set_viewport(layout_bounds(
                             &dock, term_size, win_w, win_h,
-                            &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale,
+                            &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale,
                         ));
                         active = activate_tab(next, &tabs, &toolbar, &urls);
                         layout_cache.dirty = true;
@@ -815,6 +895,53 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = reply.send(crate::protocol::Response::Text {
                             text: current.as_json(),
                         });
+                        return;
+                    }
+                    if matches!(cmd, crate::protocol::Command::ModelStatus) {
+                        controller.log_command(&cmd, true);
+                        let _ = reply.send(crate::protocol::Response::Text {
+                            text: local_model.status(),
+                        });
+                        return;
+                    }
+                    if let crate::protocol::Command::ModelLoad { path } = &cmd {
+                        controller.log_command(&cmd, true);
+                        let model = local_model.clone();
+                        let target = path.clone();
+                        let proxy = ui_proxy.clone();
+                        std::thread::spawn(move || {
+                            let result = model.load(&target);
+                            let _ = proxy.send_event(crate::ipc::UserEvent::ModelLoaded {
+                                result, reply: Some(reply),
+                            });
+                        });
+                        return;
+                    }
+                    if let crate::protocol::Command::ModelUse { provider } = &cmd {
+                        let msg = local_model.use_provider(provider);
+                        let ok = msg.contains("switched to");
+                        controller.log_command(&cmd, ok);
+                        if ok {
+                            if let Ok(mut w) = model_writer.lock() {
+                                let _ = std::io::Write::write_all(
+                                    &mut *w,
+                                    crate::local_model::LocalModel::reload_command().as_bytes(),
+                                );
+                            }
+                        }
+                        push_model_status(&model_panel, &local_model);
+                        let _ = reply.send(if ok {
+                            crate::protocol::Response::Ok { message: msg }
+                        } else {
+                            crate::protocol::Response::Error { message: msg }
+                        });
+                        return;
+                    }
+                    if matches!(cmd, crate::protocol::Command::ModelStop) {
+                        let msg = local_model.stop();
+                        controller.log_command(&cmd, true);
+                        push_model_status(&model_panel, &local_model);
+                        let _ = reply.send(crate::protocol::Response::Ok { message: msg });
                         return;
                     }
                     if let crate::protocol::Command::Dock { mode } = &cmd {
@@ -1183,6 +1310,73 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     let output = converted.to_string();
                     let _ = reply.send(crate::protocol::Response::Text { text: output });
                 }
+                crate::ipc::UserEvent::ModelAction { kind, value } => match kind.as_str() {
+                    "model_ready" => {
+                        push_model_status(&model_panel, &local_model);
+                    }
+                    "model_toggle" => {
+                        model_size = if model_size > 0 { 0 } else { 220 };
+                        let _ = terminal.evaluate_script(&format!(
+                            "window.__setModelVisible && window.__setModelVisible({})",
+                            model_size > 0
+                        ));
+                        controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
+                            &terminal, &divider, &model_panel, &model_divider, model_size,
+                            &toolbar, &tabs, &tab_strip, origin, scale));
+                        push_model_status(&model_panel, &local_model);
+                    }
+                    "model_split" => {
+                        if let Some(delta) = value.and_then(|v| v.parse::<i32>().ok()) {
+                            model_size = (model_size - delta).clamp(120, 600);
+                            controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
+                                &terminal, &divider, &model_panel, &model_divider, model_size,
+                                &toolbar, &tabs, &tab_strip, origin, scale));
+                        }
+                    }
+                    "model_load" => {
+                        if let Some(path) = value {
+                            let model = local_model.clone();
+                            let proxy = ui_proxy.clone();
+                            std::thread::spawn(move || {
+                                let result = model.load(&path);
+                                let _ = proxy.send_event(crate::ipc::UserEvent::ModelLoaded {
+                                    result, reply: None,
+                                });
+                            });
+                        }
+                    }
+                    "model_use" => {
+                        if let Some(provider) = value {
+                            let msg = local_model.use_provider(&provider);
+                            if msg.contains("switched to") {
+                                if let Ok(mut w) = model_writer.lock() {
+                                    let _ = std::io::Write::write_all(
+                                        &mut *w,
+                                        crate::local_model::LocalModel::reload_command().as_bytes(),
+                                    );
+                                }
+                            }
+                            push_model_status(&model_panel, &local_model);
+                        }
+                    }
+                    "model_stop" => {
+                        let _ = local_model.stop();
+                        push_model_status(&model_panel, &local_model);
+                    }
+                    _ => {}
+                },
+                crate::ipc::UserEvent::ModelLoaded { result, reply } => {
+                    let ok = result.is_ok();
+                    push_model_status(&model_panel, &local_model);
+                    if let Some(reply) = reply {
+                        let _ = reply.send(match result {
+                            Ok(msg) => crate::protocol::Response::Ok { message: msg },
+                            Err(msg) => crate::protocol::Response::Error { message: msg },
+                        });
+                    } else if !ok {
+                        eprintln!("agent-browser: UI model load failed");
+                    }
+                }
                 crate::ipc::UserEvent::WindowAction { action } => {
                     if action == "close" {
                         session.terminate();
@@ -1194,7 +1388,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 crate::ipc::UserEvent::LayoutDirty => { layout_cache.dirty = true; }
                 crate::ipc::UserEvent::UpdateCheck => {
                     let p = ui_proxy.clone();
-                    let _ = terminal.evaluate_script("window.__setUpdateStatus('Checking…')");
+                    let _ = terminal.evaluate_script("window.__setUpdateStatus('Checkingâ€¦')");
                     std::thread::spawn(move || {
                         let result = crate::updater::check_latest();
                         let _ = p.send_event(crate::ipc::UserEvent::UpdateChecked { result });
@@ -1254,7 +1448,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                 let app_root = root.clone();
                                 let release = info.clone();
                                 let _ = terminal.evaluate_script(
-                                    "window.__setUpdateStatus('Downloading update…')");
+                                    "window.__setUpdateStatus('Downloading updateâ€¦')");
                                 // Do NOT exit here: the updater script owns shutdown
                                 // after the download completes. Exiting now kills
                                 // this detached thread before it can install.
@@ -1313,7 +1507,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     let _ = terminal.evaluate_script(&format!("window.__setDock('{dock}')"));
                     let _ = divider.evaluate_script(&format!("window.__setDock('{dock}')"));
                     controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
-                        &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
+                        &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
                     let _ = terminal.evaluate_script("window.__fit && window.__fit()");
                 }
                 crate::ipc::UserEvent::SplitDelta { delta } => {
@@ -1321,12 +1515,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     term_size = (term_size + delta).clamp(MIN_TERM, max_size);
                     layout_cache.dirty = true;
                     controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
-                        &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale));
+                        &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
                     let _ = terminal.evaluate_script("window.__fit && window.__fit()");
                 }
             },
             _ => {}
         }
-        let _ = (&terminal, &divider, &toolbar, &tabs, &tab_strip, &session, &context);
+        let _ = (&terminal, &divider, &model_panel, &model_divider, &toolbar, &tabs, &tab_strip, &session, &context);
     });
 }
