@@ -40,11 +40,12 @@ Verified on Rust 1.99.1 / Windows 11 / WebView2 157.
    - `browser_get_viewport` — screen rectangle of the page panel
    - `browser_screenshot {path}` — capture page viewport only
    - `browser_move {x,y}`, `browser_click {x,y,button}`, `browser_scroll {x,y,dx,dy}`
-   - `browser_type {text}`, `browser_key {key}`, `browser_list_tabs`, `browser_focus_tab {index}`, `browser_dock {mode}`
+   - `browser_type {text}`, `browser_key {key}`, `browser_list_tabs`, `browser_focus_tab {index}`, `browser_close_tab {index}`, `browser_dock {mode}`
+   - `browser_navigate {url}` — open an `http(s)` URL in the active tab. Bare hosts are prefixed with `https://`; other schemes are rejected. It navigates the existing tab; it does not create tabs or windows.
 
 ## Behavior and limits
 
-- The agent has **no navigate tool** and cannot create tabs or windows. It only clicks/types inside the visible page area.
+- The agent can navigate the active tab with `browser_navigate {url}`, but cannot create tabs or windows. Coordinate actions still stay inside the visible page area. Navigating to third-party sites is done at the user's request; the harness bundles no downloader and does not bypass a site's terms — rights and safety on destination sites remain the user's responsibility.
 - All coordinate actions are checked against the content viewport; out-of-viewport points return an error.
 - Password inputs are refused using an in-page check before clicking/typing. This is a credential-safety guard, not a click approval step.
 - Every action is logged to `logs/actions.jsonl`; downloads to `downloads/` with `logs/downloads.jsonl`.

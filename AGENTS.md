@@ -22,6 +22,7 @@ Use the MCP tools provided by the `agent-browser` server:
 - `browser_scroll_into_view {text}` — jump to a known element by its visible text; `browser_scroll_dom {dx,dy}` for pixel scrolling.
 - `browser_get_viewport` — physical-screen rectangle of the page area
 - `browser_move`, `browser_click`, `browser_scroll`, `browser_type`, `browser_key`
+- `browser_navigate {url}` — open a URL in the active tab inside the harness. Accepts a full `http(s)://` URL or a bare host like `example.com` (prefixed with `https://`). Other schemes are rejected; it does not create a new tab.
 - `browser_list_tabs`, `browser_focus_tab`, `browser_close_tab {index}` — switch or close tabs; the last open tab cannot be closed.
 - `browser_dock` — dock the terminal left or bottom when the user asks
 - `browser_screenshot` — capture the page viewport to a PNG path. Use **only** to verify visual state or for canvas/images/rendering problems; do not use it just to locate buttons or read text. Screenshots cost far more tokens than text.
@@ -29,7 +30,7 @@ Use the MCP tools provided by the `agent-browser` server:
 ## Hard scope rules
 
 1. Act **only inside the page viewport**. Coordinates outside it are rejected.
-2. **No navigation tool is exposed.** Do not try to open URLs or create tabs; the user drives the address bar.
+2. **Navigation is allowed via `browser_navigate {url}` only.** Use it when the user asks you to open a site; it changes the active tab inside the harness. There is no tool to create a new tab from a URL — use `browser_list_tabs` / `browser_focus_tab` to choose the tab first. The harness bundles no third-party downloader and does not bypass any site's terms; downloading, rights, and safety on destination sites remain the user's responsibility.
 3. Password inputs are refused by policy. Never try to read, type, or bypass credentials.
 4. Use `browser_layout` once to locate controls, then `browser_click_id` / `browser_type_id` to act. Use `browser_scroll_into_view` to reach off-screen text. Take a screenshot only when visual verification is genuinely needed.
 5. All actions are logged locally; do not modify logs or policy code to bypass checks.

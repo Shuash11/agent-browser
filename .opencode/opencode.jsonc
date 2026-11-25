@@ -53,7 +53,8 @@
     { "action": "agent_browser_browser_click_id", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_close_tab", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_type_id", "resource": "*", "effect": "allow" },
-    { "action": "agent_browser_browser_dock", "resource": "*", "effect": "allow" }
+    { "action": "agent_browser_browser_dock", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_navigate", "resource": "*", "effect": "allow" }
   ]
 }
 
