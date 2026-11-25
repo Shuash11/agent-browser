@@ -6,7 +6,7 @@ The user can see this session in the left panel while a Chromium-based page sits
 ## Runtime facts
 
 - The window title is "Agent Browser — embedded OpenCode".
-- The left panel is your terminal (xterm.js + ConPTY). The right panel is the user's page (WebView2).
+- The left panel is a plain shell (xterm.js + ConPTY) opened in the app directory. OpenCode does **not** start automatically: type `opencode` yourself after `cd` into whichever project you want it to use. The right panel is the user's page (WebView2).
 - An 8 px draggable divider separates them. The user can dock your panel left or bottom.
 - Your cwd is the Agent Browser app directory; you can read its source and this file.
 - Never claim you are running in a normal shell.
