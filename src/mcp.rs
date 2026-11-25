@@ -94,14 +94,20 @@ pub struct ScrollDomParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UrlParams {
-    /// Absolute http(s) URL, or a bare host such as example.com.
+    /// Absolute URL (any scheme), or a bare host such as example.com.
     pub url: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct NewTabParams {
-    /// Optional http(s) URL (or bare host) to load in the new tab.
+    /// Optional URL (or bare host) to load in the new tab.
     pub url: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PolicyParams {
+    /// Re-read agent-policy.json before returning it.
+    pub reload: Option<bool>,
 }
 
 fn pack(r: Result<Response, String>) -> Result<String, McpError> {
@@ -261,7 +267,7 @@ impl BrowserService {
         pack(ipc::call(Command::Dock { mode: p.mode }).await)
     }
 
-    #[tool(description = "Navigate the active tab to an http(s) URL inside the harness. Accepts a full URL or a bare host.")]
+    #[tool(description = "Navigate the active tab to a URL inside the harness. Any scheme is accepted; bare hosts get https://.")]
     async fn browser_navigate(
         &self,
         Parameters(p): Parameters<UrlParams>,
@@ -269,7 +275,7 @@ impl BrowserService {
         pack(ipc::call(Command::Navigate { url: p.url }).await)
     }
 
-    #[tool(description = "Open a new tab, optionally loading an http(s) URL into it. Requires allow_new_tabs in agent-policy.json.")]
+    #[tool(description = "Open a new tab, optionally loading a URL into it. Creates a real WebView, so there is no tab cap.")]
     async fn browser_new_tab(
         &self,
         Parameters(p): Parameters<NewTabParams>,
@@ -292,9 +298,17 @@ impl BrowserService {
         pack(ipc::call(Command::Reload).await)
     }
 
-    #[tool(description = "Read the current agent autonomy policy from agent-policy.json.")]
-    async fn browser_policy(&self) -> Result<String, McpError> {
-        pack(ipc::call(Command::GetPolicy).await)
+    #[tool(description = "Read the agent autonomy policy. Set reload=true after editing agent-policy.json to apply changes without restarting.")]
+    async fn browser_policy(
+        &self,
+        Parameters(p): Parameters<PolicyParams>,
+    ) -> Result<String, McpError> {
+        pack(ipc::call(Command::GetPolicy { reload: p.reload.unwrap_or(false) }).await)
+    }
+
+    #[tool(description = "Bring the Agent Browser window to the foreground so input tools can reach it.")]
+    async fn browser_focus(&self) -> Result<String, McpError> {
+        pack(ipc::call(Command::Focus).await)
     }
 }
 

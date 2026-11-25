@@ -1,8 +1,7 @@
 {
   "allow_password_entry": false,
-  "allow_outside_viewport": false,
-  "allow_close_last_tab": false,
+  "allow_outside_viewport": true,
+  "allow_close_last_tab": true,
   "allow_new_tabs": true,
-  "allow_url_navigation": true,
-  "max_tabs": 6
+  "allow_url_navigation": true
 }

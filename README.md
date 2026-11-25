@@ -41,9 +41,10 @@ Verified on Rust 1.99.1 / Windows 11 / WebView2 157.
    - `browser_screenshot {path}` — capture page viewport only
    - `browser_move {x,y}`, `browser_click {x,y,button}`, `browser_scroll {x,y,dx,dy}`
    - `browser_type {text}`, `browser_key {key}`, `browser_list_tabs`, `browser_focus_tab {index}`, `browser_close_tab {index}`, `browser_dock {mode}`
-   - `browser_navigate {url}` — open an `http(s)` URL in the active tab. Bare hosts are prefixed with `https://`; other schemes are rejected.
-   - `browser_new_tab {url?}`, `browser_back`, `browser_forward`, `browser_reload` — open a tab, navigate history, or reload.
-   - `browser_policy` — read the current autonomy policy (`agent-policy.json`).
+   - `browser_navigate {url}` — open a URL in the active tab. Any scheme is accepted; bare hosts get `https://`.
+   - `browser_new_tab {url?}`, `browser_back`, `browser_forward`, `browser_reload` — open a tab, navigate history, or reload. New tabs create a real WebView, so there is no tab cap.
+   - `browser_policy {reload?}` — read the autonomy policy; set `reload:true` after editing the file to apply changes immediately.
+   - `browser_focus` — bring the harness window forward. Focus is best-effort and never blocks input tools.
 
 ## Autonomy policy
 
@@ -51,18 +52,20 @@ Edit `agent-policy.json` next to `agent-browser.exe` to control what the agent m
 
 | Key | Default | Meaning |
 |---|---|---|
-| `allow_password_entry` | `false` | Let the agent type into password fields |
-| `allow_outside_viewport` | `false` | Let pointer actions target coordinates outside the page |
-| `allow_close_last_tab` | `false` | Let the agent close the last remaining tab |
+| `allow_password_entry` | `false` | Let the agent type into password fields — the only remaining guard |
+| `allow_outside_viewport` | `true` | Pointer actions may target coordinates outside the page |
+| `allow_close_last_tab` | `true` | Let the agent close the last remaining tab |
 | `allow_new_tabs` | `true` | Let the agent open new tabs |
-| `allow_url_navigation` | `true` | Let the agent navigate to http(s) URLs |
-| `max_tabs` | `6` | Total tab slots (first 4 open, rest hidden spares) |
+| `allow_url_navigation` | `true` | Let the agent navigate to any parseable URL |
+
+Changes take effect with `browser_policy {reload:true}` — no restart needed. Missing or invalid values fall back to the defaults above.
 
 ## Behavior and limits
 
-- The agent can navigate, open tabs, and use history/back/forward/reload. It cannot create OS windows. Navigating to third-party sites is done at the user's request; the harness bundles no downloader and does not bypass a site's terms — rights and safety on destination sites remain the user's responsibility.
-- Coordinate actions are checked against the content viewport unless `allow_outside_viewport` is enabled.
-- Password inputs are refused by default via an in-page check. Set `allow_password_entry` to opt in. This is a credential-safety guard, not a click approval step.
+- The agent can navigate, open unlimited tabs, and use history/back/forward/reload. It cannot create OS windows. Navigating to third-party sites is done at the user's request; the harness bundles no downloader and does not bypass a site's terms — rights and safety on destination sites remain the user's responsibility.
+- There are no viewport or tab-count caps, and page text / element lists are no longer truncated.
+- Window focus is best-effort and never hard-blocks input. Call `browser_focus` if a click lands elsewhere.
+- Password inputs remain refused via an in-page check. This is the only hard block retained. It is a credential-safety guard, not a click approval step.
 - Every action is logged to `logs/actions.jsonl`; downloads to `downloads/` with `logs/downloads.jsonl`.
 - GUI↔MCP communication uses a local Windows named pipe (`\\.\pipe\agent-browser-<user>`), no TCP port.
 - Screenshots capture physical screen pixels while the app window is foregrounded. If another window covers it, capture shows that window.

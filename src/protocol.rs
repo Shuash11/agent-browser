@@ -59,7 +59,7 @@ pub enum Command {
     TypeId { id: String, text: String },
     /// Close a tab by its stable index.
     CloseTab { index: usize },
-    /// Navigate the active tab to an http(s) URL. Validated by the GUI.
+    /// Navigate the active tab to a URL. Any parseable scheme is accepted.
     Navigate { url: String },
     /// Open a new tab, optionally loading a URL into it.
     NewTab { url: Option<String> },
@@ -69,8 +69,10 @@ pub enum Command {
     Forward,
     /// Reload the active tab.
     Reload,
-    /// Return the current agent autonomy policy as JSON.
-    GetPolicy,
+    /// Return the current agent autonomy policy as JSON, optionally reloading it.
+    GetPolicy { reload: bool },
+    /// Bring the Agent Browser window to the foreground.
+    Focus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

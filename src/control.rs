@@ -173,7 +173,8 @@ impl Controller {
             Command::Back => "back",
             Command::Forward => "forward",
             Command::Reload => "reload",
-            Command::GetPolicy => "get_policy",
+            Command::GetPolicy { .. } => "get_policy",
+            Command::Focus => "focus",
         };
         let line = format!("{{\"ts\":{ts},\"action\":\"{name}\",\"ok\":{ok}}}\n");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -185,54 +186,76 @@ impl Controller {
         }
     }
 
-    fn focus_gui_window(&mut self) -> bool {
+    fn find_gui_window() -> windows_sys::Win32::Foundation::HWND {
         use windows_sys::Win32::Foundation::HWND;
-        use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
-            BringWindowToTop, FindWindowW, GetForegroundWindow,
-            GetWindowThreadProcessId, SetForegroundWindow, ShowWindow, SW_RESTORE,
+            EnumWindows, FindWindowW, GetWindowTextW,
         };
         let title: Vec<u16> = format!("{WINDOW_TITLE}\0").encode_utf16().collect();
+        let exact = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+        if !exact.is_null() {
+            return exact;
+        }
+        // The title can contain an em dash or a plain hyphen depending on the
+        // build, so fall back to a prefix scan rather than failing outright.
+        unsafe extern "system" fn scan(hwnd: HWND, param: isize) -> i32 {
+            let mut buf = [0u16; 256];
+            let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+            if n > 0 && String::from_utf16_lossy(&buf[..n as usize]).starts_with("Agent Browser") {
+                *(param as *mut HWND) = hwnd;
+                return 0;
+            }
+            1
+        }
+        let mut found: HWND = std::ptr::null_mut();
         unsafe {
-            let hwnd: HWND = FindWindowW(std::ptr::null(), title.as_ptr());
-            if hwnd.is_null() {
-                return false;
-            }
+            EnumWindows(Some(scan), &mut found as *mut HWND as isize);
+        }
+        found
+    }
+
+    fn focus_gui_window(&mut self) -> bool {
+        use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId, Sleep};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId,
+            SetForegroundWindow, ShowWindow, SW_RESTORE,
+        };
+        let hwnd = Self::find_gui_window();
+        if hwnd.is_null() {
+            return false;
+        }
+        unsafe {
             ShowWindow(hwnd, SW_RESTORE);
-            let fg = GetForegroundWindow();
-            let fg_thread = GetWindowThreadProcessId(fg, std::ptr::null_mut());
-            let our_thread = GetCurrentThreadId();
-            let attached = fg_thread != 0
-                && fg_thread != our_thread
-                && AttachThreadInput(our_thread, fg_thread, 1) != 0;
-            BringWindowToTop(hwnd);
-            SetForegroundWindow(hwnd);
-            if attached {
-                AttachThreadInput(our_thread, fg_thread, 0);
+            for _ in 0..4 {
+                let fg = GetForegroundWindow();
+                let fg_thread = GetWindowThreadProcessId(fg, std::ptr::null_mut());
+                let our_thread = GetCurrentThreadId();
+                let attached = fg_thread != 0
+                    && fg_thread != our_thread
+                    && AttachThreadInput(our_thread, fg_thread, 1) != 0;
+                BringWindowToTop(hwnd);
+                SetForegroundWindow(hwnd);
+                if attached {
+                    AttachThreadInput(our_thread, fg_thread, 0);
+                }
+                if GetForegroundWindow() == hwnd {
+                    return true;
+                }
+                Sleep(60);
             }
-            GetForegroundWindow() == hwnd
+            false
         }
     }
 
     /// `is_password` is resolved asynchronously by the GUI before calling here.
     pub fn execute(&mut self, cmd: &Command, webview: &WebView, is_password: bool) -> Response {
-        // Bring our window forward so injected input and screen capture target
-        // it rather than whatever the user had focused.
+        // Focus is best-effort. A failed focus used to hard-block every input
+        // tool; now the agent can call browser_focus explicitly and input
+        // still proceeds, so window focus is never a hard block.
         let _ = webview.focus();
-        let foreground_ok = self.focus_gui_window();
-        let is_input = matches!(
-            cmd,
-            Command::Move { .. } | Command::Click { .. } | Command::Scroll { .. }
-                | Command::Type { .. } | Command::Key { .. }
-        );
-        if is_input && !foreground_ok {
-            self.log_command(cmd, false);
-            return Response::Error {
-                message: "Agent Browser is not foreground; bring it to the front".into(),
-            };
-        }
-        // Coordinate actions stay inside the page unless the user explicitly
-        // opts in with allow_outside_viewport in agent-policy.json.
+        let _ = self.focus_gui_window();
+        // Coordinate actions are unrestricted by default; the user may still
+        // opt back into page-only scoping with agent-policy.json.
         if let Some((x, y)) = action_point(cmd) {
             if !crate::policy::policy().allow_outside_viewport && !self.viewport.contains(x, y) {
                 self.log_command(cmd, false);
@@ -323,13 +346,20 @@ impl Controller {
                 }
             }
             Command::GetViewport => Response::Viewport { viewport: self.viewport.clone() },
+            Command::Focus => {
+                if self.focus_gui_window() {
+                    Response::Ok { message: "Agent Browser focused".into() }
+                } else {
+                    Response::Error { message: "could not focus Agent Browser window".into() }
+                }
+            }
             Command::Dock { .. } => Response::Ok { message: "dock requested".into() },
             Command::PageText | Command::PageElements | Command::ScrollDom { .. }
             | Command::ScrollIntoView { .. } | Command::Layout { .. }
             | Command::ClickId { .. } | Command::TypeId { .. }
             | Command::CloseTab { .. } | Command::Navigate { .. }
             | Command::NewTab { .. } | Command::Back | Command::Forward
-            | Command::Reload | Command::GetPolicy => Response::Error {
+            | Command::Reload | Command::GetPolicy { .. } => Response::Error {
                 message: "command must be handled by the GUI event loop".into(),
             },
         };

@@ -32,29 +32,25 @@ fn rect(x: i32, y: i32, w: i32, h: i32) -> wry::Rect {
     }
 }
 
-/// Normalize a user- or agent-supplied destination into a safe http(s) URL.
-/// Bare hosts get an `https://` prefix; anything with another scheme or no
-/// host is rejected. Shared by the toolbar and the MCP navigation tool so
-/// there is a single validation path.
+/// Normalize a user- or agent-supplied destination into a URL. Any scheme is
+/// accepted (file, data, mailto, about, custom); bare hosts get `https://`.
+/// An empty destination is the only thing rejected. Shared by the toolbar and
+/// the MCP navigation tools so there is a single validation path.
 fn navigation_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let candidate = if trimmed.contains("://") {
+    let has_scheme = trimmed.contains("://")
+        || ["about:", "data:", "mailto:", "tel:", "file:"]
+            .iter()
+            .any(|p| trimmed.to_ascii_lowercase().starts_with(p));
+    let candidate = if has_scheme {
         trimmed.to_string()
     } else {
         format!("https://{trimmed}")
     };
-    match Url::parse(&candidate) {
-        Ok(u)
-            if (u.scheme() == "http" || u.scheme() == "https")
-                && !u.host_str().unwrap_or("").is_empty() =>
-        {
-            Some(u.to_string())
-        }
-        _ => None,
-    }
+    Url::parse(&candidate).ok().map(|u| u.to_string())
 }
 
 const WINDOW_W: i32 = 1600;
@@ -195,9 +191,65 @@ fn serve_abterm(assets: &Path, request: &wry::http::Request<Vec<u8>>) -> wry::ht
         .unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_tab(
+    context: &mut WebContext,
+    window: &tao::window::Window,
+    url: &str,
+    index: usize,
+    browser_proxy: tao::event_loop::EventLoopProxy<crate::ipc::UserEvent>,
+    tab_ipc_proxy: tao::event_loop::EventLoopProxy<crate::ipc::UserEvent>,
+    term_dir: &PathBuf,
+    downloads: &PathBuf,
+    logs: &PathBuf,
+) -> Result<wry::WebView, Box<dyn std::error::Error>> {
+    let tab_assets = term_dir.clone();
+    let dl_dir = downloads.clone();
+    let lg_dir = logs.clone();
+    Ok(WebViewBuilder::new_with_web_context(context)
+        .with_initialization_script(SHADOW_TRACK_JS)
+        .with_bounds(rect(TERMINAL_W + DIVIDER_W, TOOLBAR_H,
+            WINDOW_W - TERMINAL_W - DIVIDER_W - TAB_W, WINDOW_H - TOOLBAR_H))
+        .with_custom_protocol("abterm".into(), move |_id, request| {
+            serve_abterm(&tab_assets, &request)
+        })
+        .with_url(url)
+        .with_on_page_load_handler(move |_event, loaded| {
+            let _ = browser_proxy.send_event(crate::ipc::UserEvent::PageLoaded {
+                url: loaded, tab: index,
+            });
+        })
+        .with_download_started_handler(move |_url, path| {
+            let p = path;
+            *p = dl_dir.join(p.file_name().unwrap_or_default());
+            true
+        })
+        .with_download_completed_handler(move |url, path, ok| {
+            let line = format!("{{\"url\":{:?},\"path\":{:?},\"ok\":{}}}\n", url,
+                path.as_ref().map(|p| p.to_string_lossy().to_string()), ok);
+            let _ = fs::OpenOptions::new().create(true).append(true)
+                .open(lg_dir.join("downloads.jsonl"))
+                .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+        })
+        .with_ipc_handler(move |request| {
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(request.body()) {
+                let kind = msg.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if kind == "layout_changed" {
+                    let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::LayoutDirty);
+                    return;
+                }
+                let value = msg.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::BrowserAction {
+                    kind, value, tab: Some(index),
+                });
+            }
+        })
+        .build_as_child(window)?)
+}
+
 fn page_text_js() -> String {
     "(function(){return JSON.stringify({title:document.title,url:location.href,\
-     text:(document.body&&document.body.innerText||'').slice(0,8000)});})()".to_string()
+     text:(document.body&&document.body.innerText||'')});})()".to_string()
 }
 
 fn page_elements_js() -> String {
@@ -208,10 +260,10 @@ fn page_elements_js() -> String {
      var s=getComputedStyle(e);if(s.visibility==='hidden'||s.display==='none'||s.opacity==='0')continue;\
      var label=(e.innerText||e.value||e.getAttribute('aria-label')||e.placeholder||'');\
      out.push({tag:e.tagName,role:e.getAttribute('role')||'',\
-     label:String(label).trim().slice(0,100),\
+     label:String(label).trim(),\
      x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2),\
      w:Math.round(r.width),h:Math.round(r.height)});\
-     if(out.length>=120)break;}\
+     }\
      return JSON.stringify({innerWidth:window.innerWidth,innerHeight:window.innerHeight,elements:out});})()"
         .to_string()
 }
@@ -226,7 +278,7 @@ fn scroll_into_view_js(text: &str) -> String {
          var t=(e.innerText||e.value||e.getAttribute('aria-label')||'').trim();\
          if(!t||t.toLowerCase().indexOf(needle)<0)continue;\
          var r=e.getBoundingClientRect();var area=r.width*r.height;\
-         if(area>0&&area<bestArea){{best=e;bestArea=area;bestText=t.slice(0,120);}}}}\
+         if(area>0&&area<bestArea){{best=e;bestArea=area;bestText=t;}}}}\
          if(best){{best.scrollIntoView({{block:'center',behavior:'instant'}});\
          return JSON.stringify({{found:true,text:bestText}});}}\
          return JSON.stringify({{found:false,text:n}});}})()"
@@ -426,60 +478,15 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let fixture_url = Url::from_file_path(&fixture)
         .map_err(|_| format!("invalid fixture path: {}", fixture.display()))?
         .to_string();
-    // Spare hidden tab slots are created from the user's policy so the agent
-    // can genuinely open new tabs without rebuilding a WebView mid-session.
-    let max_tabs = crate::policy::policy().max_tabs.max(4);
-    let mut tab_urls = vec![newtab_url.to_string(), fixture_url,
-                            newtab_url.to_string(), newtab_url.to_string()];
-    while tab_urls.len() < max_tabs {
-        tab_urls.push(newtab_url.to_string());
-    }
+    let tab_urls = vec![newtab_url.to_string(), fixture_url,
+                        newtab_url.to_string(), newtab_url.to_string()];
     let mut tabs: Vec<wry::WebView> = Vec::new();
     for (i, url) in tab_urls.iter().enumerate() {
-        let browser_proxy_tab = event_loop.create_proxy();
-        let tab_ipc_proxy = event_loop.create_proxy();
-        let tab_assets = term_dir.clone();
-        let dl_dir = downloads.clone();
-        let lg_dir = logs.clone();
-        let b = WebViewBuilder::new_with_web_context(&mut context)
-            .with_initialization_script(SHADOW_TRACK_JS)
-            .with_bounds(rect(TERMINAL_W + DIVIDER_W, TOOLBAR_H,
-                WINDOW_W - TERMINAL_W - DIVIDER_W - TAB_W, WINDOW_H - TOOLBAR_H))
-            .with_custom_protocol("abterm".into(), move |_id, request| {
-                serve_abterm(&tab_assets, &request)
-            })
-            .with_url(url)
-            .with_on_page_load_handler(move |_event, loaded| {
-                let _ = browser_proxy_tab.send_event(crate::ipc::UserEvent::PageLoaded {
-                    url: loaded, tab: i,
-                });
-            })
-            .with_download_started_handler(move |_url, path| {
-                let p = path;
-                *p = dl_dir.join(p.file_name().unwrap_or_default());
-                true
-            })
-            .with_download_completed_handler(move |url, path, ok| {
-                let line = format!("{{\"url\":{:?},\"path\":{:?},\"ok\":{}}}\n", url,
-                    path.as_ref().map(|p| p.to_string_lossy().to_string()), ok);
-                let _ = fs::OpenOptions::new().create(true).append(true)
-                    .open(lg_dir.join("downloads.jsonl"))
-                    .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
-            })
-            .with_ipc_handler(move |request| {
-                if let Ok(msg) = serde_json::from_str::<serde_json::Value>(request.body()) {
-                    let kind = msg.get("type").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    if kind == "layout_changed" {
-                        let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::LayoutDirty);
-                        return;
-                    }
-                    let value = msg.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let _ = tab_ipc_proxy.send_event(crate::ipc::UserEvent::BrowserAction {
-                        kind, value, tab: Some(i),
-                    });
-                }
-            });
-        tabs.push(b.build_as_child(&window)?);
+        tabs.push(build_tab(
+            &mut context, &window, url, i,
+            event_loop.create_proxy(), event_loop.create_proxy(),
+            &term_dir, &downloads, &logs,
+        )?);
     }
 
     // --- toolbar ---
@@ -548,11 +555,8 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let mut active = 0usize;
     let mut titles = vec!["New Tab".to_string(), "Fixture".to_string(),
                           "New Tab".to_string(), "New Tab".to_string()];
-    while titles.len() < tab_urls.len() {
-        titles.push("New Tab".to_string());
-    }
     let mut urls = tab_urls.clone();
-    let mut closed: Vec<bool> = (0..tabs.len()).map(|i| i >= 4).collect();
+    let mut closed = vec![false; tabs.len()];
     let refresh_tabs = |tabs_w: &wry::WebView, titles: &Vec<String>, urls: &Vec<String>,
                         active: usize, closed: &Vec<bool>| {
         if let (Ok(t), Ok(u), Ok(c)) = (
@@ -566,6 +570,10 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     for (i, tab) in tabs.iter().enumerate() { tab.set_visible(i == 0).ok(); }
     refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
     println!("GUI ready: root={}; {} tabs, page viewport {:?}", root.display(), tabs.len(), viewport);
+
+    // Cloned inside the event loop when a brand-new tab WebView is needed.
+    let tab_proxy_template = event_loop.create_proxy();
+    let tab_ipc_template = event_loop.create_proxy();
 
     let mut term_ready = false;
     let mut pending_output: Vec<String> = Vec::new();
@@ -692,7 +700,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             let _ = reply.send(crate::protocol::Response::Error {
                                 message: if allowed {
-                                    "URL must be a valid http(s) address".into()
+                                    "URL could not be parsed".into()
                                 } else {
                                     "URL navigation is disabled in agent-policy.json".into()
                                 },
@@ -709,35 +717,59 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             });
                             return;
                         }
-                        let Some(next) = closed.iter().position(|c| *c) else {
-                            let _ = reply.send(crate::protocol::Response::Error {
-                                message: format!(
-                                    "no free tab slot; close a tab or raise max_tabs (currently {}) in agent-policy.json",
-                                    tabs.len()
-                                ),
-                            });
-                            return;
-                        };
                         let target = match url.as_deref() {
                             Some(raw) => match navigation_url(raw) {
                                 Some(u) => u,
                                 None => {
                                     let _ = reply.send(crate::protocol::Response::Error {
-                                        message: "URL must be a valid http(s) address".into(),
+                                        message: "URL could not be parsed".into(),
                                     });
                                     return;
                                 }
                             },
                             None => newtab_url.to_string(),
                         };
-                        closed[next] = false;
-                        let _ = tabs[next].load_url(&target);
-                        urls[next] = target.clone();
-                        titles[next] = if target == newtab_url {
-                            "New Tab".into()
+                        let label = if target == newtab_url {
+                            "New Tab".to_string()
                         } else {
                             target.clone()
                         };
+                        let (next, reused) = if let Some(i) = closed.iter().position(|c| *c) {
+                            (i, true)
+                        } else {
+                            // No free slot: create a real WebView instead of
+                            // capping the number of tabs.
+                            match build_tab(
+                                &mut context, &window, &target, tabs.len(),
+                                tab_proxy_template.clone(), tab_ipc_template.clone(),
+                                &term_dir, &downloads, &logs,
+                            ) {
+                                Ok(tab) => {
+                                    let i = tabs.len();
+                                    tabs.push(tab);
+                                    titles.push(label.clone());
+                                    urls.push(target.clone());
+                                    closed.push(false);
+                                    (i, false)
+                                }
+                                Err(e) => {
+                                    let _ = reply.send(crate::protocol::Response::Error {
+                                        message: format!("could not create tab: {e}"),
+                                    });
+                                    return;
+                                }
+                            }
+                        };
+                        if reused {
+                            closed[next] = false;
+                            let _ = tabs[next].load_url(&target);
+                            titles[next] = label;
+                            urls[next] = target.clone();
+                        }
+                        controller.set_viewport(layout_bounds(
+                            &dock, term_size, win_w, win_h,
+                            &terminal, &divider, &toolbar, &tabs, &tab_strip, origin, scale,
+                        ));
                         active = activate_tab(next, &tabs, &toolbar, &urls);
                         layout_cache.dirty = true;
                         refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
@@ -773,10 +805,15 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         });
                         return;
                     }
-                    if matches!(cmd, crate::protocol::Command::GetPolicy) {
+                    if let crate::protocol::Command::GetPolicy { reload } = &cmd {
                         controller.log_command(&cmd, true);
+                        let current = if *reload {
+                            crate::policy::reload_policy()
+                        } else {
+                            crate::policy::policy()
+                        };
                         let _ = reply.send(crate::protocol::Response::Text {
-                            text: crate::policy::policy().as_json(),
+                            text: current.as_json(),
                         });
                         return;
                     }
@@ -903,8 +940,16 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         return;
                     }
+                    // A deliberate click outside the page has no page element
+                    // to inspect, so the fail-closed password check would
+                    // refuse it. Skip that check for outside clicks; password
+                    // fields inside the page are still protected.
+                    let outside_click = matches!(cmd, crate::protocol::Command::Click { x, y, .. }
+                        if crate::policy::policy().allow_outside_viewport
+                            && !controller.viewport().contains(x, y));
                     let needs_check = matches!(cmd,
-                        crate::protocol::Command::Click { .. } | crate::protocol::Command::Type { .. });
+                        crate::protocol::Command::Click { .. } | crate::protocol::Command::Type { .. })
+                        && !outside_click;
                     if needs_check {
                         let relative = match &cmd {
                             crate::protocol::Command::Click { x, y, .. } => {
@@ -968,7 +1013,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                 let _ = tabs[target].load_url(&u);
                                 let _ = toolbar.evaluate_script("window.__setStatus('')");
                             } else {
-                                let _ = toolbar.evaluate_script("window.__setStatus('Use http(s)')");
+                                let _ = toolbar.evaluate_script("window.__setStatus('Invalid URL')");
                             }
                         }
                         "back" => { let _ = tabs[target].go_back(); }
