@@ -1,6 +1,6 @@
 [package]
 name = "agent-browser"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 description = "Local browser panel controlled by OpenCode over MCP (personal use)"
 

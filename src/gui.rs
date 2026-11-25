@@ -273,25 +273,12 @@ try {
 } catch (e) {}
 })();"#;
 
-fn opencode_command() -> (String, Vec<String>) {
-    let npm = std::env::var("APPDATA")
-        .map(|p| PathBuf::from(p).join("npm").join("opencode.cmd"))
-        .unwrap_or_default();
-    if npm.is_file() {
-        return (npm.to_string_lossy().to_string(), Vec::new());
-    }
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            for name in ["opencode.cmd", "opencode.exe", "opencode"] {
-                let candidate = dir.join(name);
-                if candidate.is_file() {
-                    return (candidate.to_string_lossy().to_string(), Vec::new());
-                }
-            }
-        }
-    }
-    // Last resort: let cmd.exe resolve it from PATH or show a clear error.
-    ("cmd.exe".to_string(), vec!["/c".to_string(), "opencode".to_string()])
+fn terminal_command() -> (String, Vec<String>) {
+    // Open a plain shell in the app directory. The user decides when and where
+    // to run `opencode` (e.g. after `cd` into the project they want to work on).
+    let comspec = std::env::var("COMSPEC")
+        .unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".to_string());
+    (comspec, Vec::new())
 }
 
 fn activate_tab(
@@ -330,7 +317,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         .with_resizable(true)
         .build(&event_loop)?;
 
-    let (opencode_prog, opencode_args) = opencode_command();
+    let (opencode_prog, opencode_args) = terminal_command();
     let arg_refs: Vec<&str> = opencode_args.iter().map(|s| s.as_str()).collect();
     let session = crate::terminal::TerminalSession::spawn(
         &opencode_prog, &arg_refs, &root, term_proxy,
