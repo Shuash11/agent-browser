@@ -72,7 +72,8 @@
     { "action": "agent_browser_browser_model_stop", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_search", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_hover", "resource": "*", "effect": "allow" },
-    { "action": "agent_browser_browser_help", "resource": "*", "effect": "allow" }
+    { "action": "agent_browser_browser_help", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_act", "resource": "*", "effect": "allow" }
   ]
 }
 

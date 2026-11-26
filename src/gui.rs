@@ -251,6 +251,25 @@ fn harness_chrome_rects(
     rects
 }
 
+/// Parse a page-elements scan and return only the coordinates for one stable
+/// ID. Keeps ID resolution responses tiny compared with the full layout JSON.
+fn resolve_id_from_scan(text: &str, viewport: &crate::protocol::Viewport, id: &str) -> Option<(i32, i32)> {
+    let mut value: serde_json::Value = serde_json::from_str(text).ok()?;
+    if let serde_json::Value::String(s) = value {
+        value = serde_json::from_str(&s).ok()?;
+    }
+    let inner_w = value.get("innerWidth").and_then(|v| v.as_f64()).unwrap_or(1.0);
+    let inner_h = value.get("innerHeight").and_then(|v| v.as_f64()).unwrap_or(1.0);
+    let rx = viewport.width as f64 / inner_w.max(1.0);
+    let ry = viewport.height as f64 / inner_h.max(1.0);
+    let element = value.get("elements")?.as_array()?.iter().enumerate()
+        .find(|(i, _)| format!("e{}", i + 1) == id)
+        .map(|(_, e)| e)?;
+    let x = element.get("x")?.as_f64()?;
+    let y = element.get("y")?.as_f64()?;
+    Some((viewport.x + (x * rx) as i32, viewport.y + (y * ry) as i32))
+}
+
 fn push_model_status(panel: &wry::WebView, model: &crate::local_model::LocalModel) {
     if let Ok(js) = serde_json::to_string(&model.status()) {
         let _ = panel.evaluate_script(&format!("window.__setModelStatus({js})"));
@@ -1039,6 +1058,55 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         controller.log_command(&cmd, true);
                         push_model_status(&model_panel, &local_model);
                         let _ = reply.send(crate::protocol::Response::Ok { message: msg });
+                        return;
+                    }
+                    if let crate::protocol::Command::ResolveId { id, refresh } = &cmd {
+                        controller.log_command(&cmd, true);
+                        if !*refresh {
+                            let stale = layout_cache.dirty
+                                || layout_cache.tab != active
+                                || layout_cache.url != urls[active];
+                            let found = if stale { None } else {
+                                layout_cache.entries.iter().find(|e| e.id == *id)
+                                    .map(|e| (e.sx, e.sy))
+                            };
+                            let _ = reply.send(match found {
+                                Some((x, y)) => crate::protocol::Response::Text {
+                                    text: serde_json::json!({ "x": x, "y": y }).to_string(),
+                                },
+                                None => crate::protocol::Response::Error {
+                                    message: "layout is stale; call browser_layout {refresh:true}".into(),
+                                },
+                            });
+                            return;
+                        }
+                        let viewport = controller.viewport().clone();
+                        let target_tab = active;
+                        let slot = Arc::new(Mutex::new(Some(reply)));
+                        let slot_cb = slot.clone();
+                        let id_owned = id.clone();
+                        if let Err(e) = tabs[target_tab].evaluate_script_with_callback(
+                            &page_elements_js(),
+                            move |text| {
+                                if let Some(reply) = slot_cb.lock().unwrap().take() {
+                                    let response = match resolve_id_from_scan(&text, &viewport, &id_owned) {
+                                        Some((x, y)) => crate::protocol::Response::Text {
+                                            text: serde_json::json!({ "x": x, "y": y }).to_string(),
+                                        },
+                                        None => crate::protocol::Response::Error {
+                                            message: format!("unknown layout id: {id_owned}; call browser_layout"),
+                                        },
+                                    };
+                                    let _ = reply.send(response);
+                                }
+                            },
+                        ) {
+                            if let Some(reply) = slot.lock().unwrap().take() {
+                                let _ = reply.send(crate::protocol::Response::Error {
+                                    message: format!("ID resolution failed: {e}"),
+                                });
+                            }
+                        }
                         return;
                     }
                     if let crate::protocol::Command::HoverId { id } = &cmd {

@@ -47,10 +47,11 @@ Verified on Rust 1.99.1 / Windows 11 / WebView2 157.
    - `browser_focus` — bring the harness window forward. Focus is best-effort and never blocks input tools.
    - `browser_model_status`, `browser_model_load {path}`, `browser_model_use {provider}`, `browser_model_stop` — host a local GGUF and switch OpenCode between local and cloud.
    - `browser_search {query,engine?}` — URL-encoded web search (one call). `browser_hover {id}` — hover an element and refresh layout. `browser_help {tool?}` — usage recipes and JSON examples.
+   - `browser_act {steps}` — run a short validated browser sequence in one MCP call (fewer model turns). Code Mode `execute` can batch independent reads.
 
 ## Operator recipe
 
-`AGENTS.md` contains a fixed recipe for search, read, click, stale IDs, hover, and form filling — follow it instead of inventing a strategy. Call `browser_help {"tool":"..."}` any time to get the exact JSON shape for a tool. All 32 tools remain available; there is no reduced-tool default.
+`AGENTS.md` contains a fixed recipe for search, read, click, stale IDs, hover, and form filling — follow it instead of inventing a strategy. Call `browser_help {"tool":"..."}` any time to get the exact JSON shape for a tool. All 33 tools remain available; there is no reduced-tool default.
 
 ## Local model (confidential work)
 

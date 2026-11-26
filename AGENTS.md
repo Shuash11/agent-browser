@@ -41,7 +41,8 @@ Do not invent strategies. Use these fixed recipes:
 5. **Hover:** call `browser_hover {"id":"eN"}`, then `browser_layout {"refresh":true}`, then click the revealed menu by ID.
 6. **Fill a form:** `browser_type_id {"id":"eN","text":"..."}` then `browser_key {"key":"Enter"}`.
 7. **Unsure about arguments:** call `browser_help {"tool":"browser_click_id"}` — it returns the exact JSON shape.
-8. **Never** type a credential. That is the one hard block.
+8. **Batch to save time:** use one Code Mode `execute` call for several independent reads, and `browser_act {"steps":[...]}` for a short sequential browser sequence. Fewer tool calls means fewer model turns.
+9. **Never** type a credential. That is the one hard block.
 
 ## Policy-driven scope rules
 

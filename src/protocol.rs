@@ -83,6 +83,8 @@ pub enum Command {
     ModelStop,
     /// Move the real cursor to a layout element atomically in the GUI.
     HoverId { id: String },
+    /// Resolve a layout ID to screen coordinates without returning the full layout.
+    ResolveId { id: String, refresh: bool },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -103,6 +105,28 @@ pub struct TabInfo {
     pub title: String,
     pub url: String,
     pub active: bool,
+}
+
+/// One step inside a `browser_act` sequence. Only `op` is required; unused
+/// fields are ignored, so the model has a single flat shape to emit.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, rmcp::schemars::JsonSchema)]
+pub struct ActStep {
+    /// navigate | click_id | type_id | key | scroll | text | layout | wait
+    pub op: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub dx: Option<i32>,
+    #[serde(default)]
+    pub dy: Option<i32>,
+    #[serde(default)]
+    pub ms: Option<u64>,
 }
 
 /// Actions that carry coordinates and must be checked against the viewport.

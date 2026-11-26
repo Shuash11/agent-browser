@@ -230,6 +230,7 @@ impl Controller {
             Command::ModelUse { .. } => "model_use",
             Command::ModelStop => "model_stop",
             Command::HoverId { .. } => "hover_id",
+            Command::ResolveId { .. } => "resolve_id",
         };
         let line = format!("{{\"ts\":{ts},\"action\":\"{name}\",\"ok\":{ok}}}\n");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -430,7 +431,7 @@ impl Controller {
             | Command::NewTab { .. } | Command::Back | Command::Forward
             | Command::Reload | Command::GetPolicy { .. }
             | Command::ModelStatus | Command::ModelLoad { .. } | Command::ModelUse { .. }
-            | Command::ModelStop | Command::HoverId { .. } => Response::Error {
+            | Command::ModelStop | Command::HoverId { .. } | Command::ResolveId { .. } => Response::Error {
                 message: "command must be handled by the GUI event loop".into(),
             },
         };

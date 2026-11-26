@@ -136,6 +136,12 @@ pub struct HelpParams {
     pub tool: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ActParams {
+    /// Sequential steps, e.g. [{"op":"navigate","url":"..."},{"op":"click_id","id":"e3"}].
+    pub steps: Vec<crate::protocol::ActStep>,
+}
+
 fn url_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -185,6 +191,7 @@ fn help_json(filter: Option<&str>) -> String {
         ("browser_model_stop", "Stop the local model server.", "{}"),
         ("browser_help", "Show this reference; filter by tool name.", "{\"tool\":\"browser_click_id\"}"),
         ("browser_scroll", "Scroll at a point (dy>0 down).", "{\"x\":800,\"y\":400,\"dx\":0,\"dy\":300}"),
+        ("browser_act", "Run a validated browser sequence in one call.", "{\"steps\":[{\"op\":\"navigate\",\"url\":\"https://example.com\"},{\"op\":\"text\"}]}"),
     ];
     let selected: Vec<serde_json::Value> = entries
         .iter()
@@ -226,21 +233,16 @@ async fn fresh_layout_enabled() -> Result<bool, McpError> {
 
 /// Resolve a stable layout ID to current screen coordinates via a fresh scan.
 async fn fresh_coords(id: &str) -> Result<(i32, i32), McpError> {
-    let layout = pack(ipc::call(Command::Layout { refresh: true }).await)?;
-    let value: serde_json::Value = serde_json::from_str(&layout)
-        .map_err(|e| McpError::internal_error(format!("bad layout JSON: {e}"), None))?;
-    let element = value
-        .get("elements")
-        .and_then(|v| v.as_array())
-        .and_then(|items| items.iter().find(|e| e.get("id").and_then(|i| i.as_str()) == Some(id)))
-        .ok_or_else(|| {
-            McpError::invalid_params(
-                format!("unknown layout id {id}; call browser_layout to list IDs"),
-                None,
-            )
-        })?;
-    let x = element.get("sx").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    let y = element.get("sy").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    // Lightweight: the GUI returns only {x,y}, not the whole layout JSON.
+    let text = pack(ipc::call(Command::ResolveId { id: id.to_string(), refresh: true }).await)?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| McpError::internal_error(format!("bad resolve JSON: {e}"), None))?;
+    let x = value.get("x").and_then(|v| v.as_i64())
+        .ok_or_else(|| McpError::invalid_params(
+            value.get("message").and_then(|v| v.as_str()).unwrap_or("could not resolve ID").to_string(),
+            None,
+        ))? as i32;
+    let y = value.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
     Ok((x, y))
 }
 
@@ -497,6 +499,83 @@ impl BrowserService {
         pack(ipc::call(Command::HoverId { id: p.id }).await)
     }
 
+    #[tool(description = "Run a short browser sequence in one call. Example: {\"steps\":[{\"op\":\"navigate\",\"url\":\"https://example.com\"},{\"op\":\"text\"}]}")]
+    async fn browser_act(
+        &self,
+        Parameters(p): Parameters<ActParams>,
+    ) -> Result<String, McpError> {
+        if p.steps.is_empty() || p.steps.len() > 20 {
+            return Err(McpError::invalid_params("steps must contain 1 to 20 actions", None));
+        }
+        let fresh = fresh_layout_enabled().await?;
+        let mut results = Vec::new();
+        for (i, step) in p.steps.iter().enumerate() {
+            let op = step.op.to_ascii_lowercase();
+            let outcome: Result<String, McpError> = match op.as_str() {
+                "navigate" => {
+                    let url = step.url.clone().ok_or_else(|| {
+                        McpError::invalid_params("navigate needs url", None)
+                    })?;
+                    pack(ipc::call(Command::Navigate { url }).await)
+                }
+                "click_id" => {
+                    let id = step.id.clone().ok_or_else(|| {
+                        McpError::invalid_params("click_id needs id", None)
+                    })?;
+                    if fresh {
+                        let (x, y) = fresh_coords(&id).await?;
+                        pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)
+                    } else {
+                        pack(ipc::call(Command::ClickId { id }).await)
+                    }
+                }
+                "type_id" => {
+                    let id = step.id.clone().ok_or_else(|| {
+                        McpError::invalid_params("type_id needs id", None)
+                    })?;
+                    let text = step.text.clone().ok_or_else(|| {
+                        McpError::invalid_params("type_id needs text", None)
+                    })?;
+                    if fresh {
+                        let (x, y) = fresh_coords(&id).await?;
+                        let clicked = pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)?;
+                        if clicked.contains("\"status\":\"error\"") {
+                            Ok(clicked)
+                        } else {
+                            pack(ipc::call(Command::Type { text }).await)
+                        }
+                    } else {
+                        pack(ipc::call(Command::TypeId { id, text }).await)
+                    }
+                }
+                "key" => {
+                    let key = step.key.clone().ok_or_else(|| {
+                        McpError::invalid_params("key needs key", None)
+                    })?;
+                    pack(ipc::call(Command::Key { key }).await)
+                }
+                "scroll" => pack(ipc::call(Command::ScrollDom {
+                    dx: step.dx.unwrap_or(0), dy: step.dy.unwrap_or(0),
+                }).await),
+                "text" => pack(ipc::call(Command::PageText).await),
+                "layout" => pack(ipc::call(Command::Layout { refresh: false }).await),
+                "wait" => {
+                    let ms = step.ms.unwrap_or(100).min(5000);
+                    tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                    Ok(format!("waited {ms}ms"))
+                }
+                other => Err(McpError::invalid_params(
+                    format!("unknown act op: {other}"), None,
+                )),
+            };
+            let value = outcome.map_err(|e| {
+                McpError::internal_error(format!("step {} ({op}) failed: {e}", i + 1), None)
+            })?;
+            results.push(serde_json::json!({ "step": i + 1, "op": op, "result": value }));
+        }
+        Ok(serde_json::json!({ "status": "ok", "steps": results }).to_string())
+    }
+
     #[tool(description = "Show usage recipes and JSON examples. Example: {\"tool\":\"browser_click_id\"}")]
     async fn browser_help(
         &self,
@@ -529,7 +608,7 @@ mod tests {
     fn help_lists_every_tool() {
         let value: serde_json::Value = serde_json::from_str(&help_json(None)).unwrap();
         let tools = value.get("tools").and_then(|v| v.as_array()).unwrap();
-        assert_eq!(tools.len(), 32);
+        assert_eq!(tools.len(), 33);
     }
 }
 
