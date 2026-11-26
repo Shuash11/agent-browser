@@ -363,6 +363,26 @@ fn layout_bounds(
 // so the password guard can fail closed without DevTools inspection.
 const SHADOW_TRACK_JS: &str = r#"(function(){
 window.__abClosedHosts = new WeakSet();
+// Capture pristine DOM primitives before page scripts run and expose them
+// through a non-configurable global. The credential guard uses these instead
+// of page-overridable methods.
+try {
+  var doc = document;
+  var activeGet = Object.getOwnPropertyDescriptor(Document.prototype,'activeElement').get;
+  var tagGet = Object.getOwnPropertyDescriptor(Element.prototype,'tagName').get;
+  var typeGet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'type').get;
+  var efp = doc.elementFromPoint.bind(doc);
+  var closest = Element.prototype.closest;
+  var closed = function(e){try{return window.__abClosedHosts.has(e);}catch(x){return true;}};
+  Object.defineProperty(window,'__abDom',{value:{
+    active:function(){return activeGet.call(doc);},
+    tag:function(e){return tagGet.call(e);},
+    type:function(e){return typeGet.call(e);},
+    efp:function(x,y){return efp(x,y);},
+    closest:closest,
+    closed:closed
+  },writable:false,configurable:false});
+} catch (e) {}
 var orig = Element.prototype.attachShadow;
 Element.prototype.attachShadow = function (init) {
   try { window.__abClosedHosts.add(this); } catch (e) {}
@@ -375,6 +395,9 @@ try {
     childList: true, subtree: true, attributes: true, characterData: true
   });
 } catch (e) {}
+try { window.addEventListener('scroll', function () {
+  window.chrome.webview.postMessage(JSON.stringify({ type: 'layout_changed' }));
+}, true); } catch (e) {}
 })();"#;
 
 fn terminal_command() -> (String, Vec<String>) {
@@ -427,7 +450,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         &opencode_prog, &arg_refs, &root, term_proxy,
     )?;
     let writer = session.writer_handle();
-    let model_writer = writer.clone();
     let resize_session = session.clone();
     let term_proxy_ipc = event_loop.create_proxy();
     let term_dir = root.join("assets").join("terminal");
@@ -511,7 +533,8 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
     let fixture_url = Url::from_file_path(&fixture)
         .map_err(|_| format!("invalid fixture path: {}", fixture.display()))?
         .to_string();
-    let tab_urls = vec![newtab_url.to_string(), fixture_url,
+    let _fixture_url = fixture_url; // kept for local tests, never opened in production
+    let tab_urls = vec![newtab_url.to_string(), newtab_url.to_string(),
                         newtab_url.to_string(), newtab_url.to_string()];
     let mut tabs: Vec<wry::WebView> = Vec::new();
     for (i, url) in tab_urls.iter().enumerate() {
@@ -627,13 +650,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
             Ok(rt) => rt, Err(e) => { eprintln!("IPC runtime error: {e}"); return; }
         };
-        if let Err(e) = rt.block_on(crate::ipc::serve(proxy)) {
-            eprintln!("IPC server error: {e}");
-        }
+        rt.block_on(crate::ipc::serve(proxy));
     });
 
     let mut active = 0usize;
-    let mut titles = vec!["New Tab".to_string(), "Fixture".to_string(),
+    let mut titles = vec!["New Tab".to_string(), "New Tab".to_string(),
                           "New Tab".to_string(), "New Tab".to_string()];
     let mut urls = tab_urls.clone();
     let mut closed = vec![false; tabs.len()];
@@ -737,7 +758,13 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         closed[*index] = true;
                         tabs[*index].set_visible(false).ok();
-                        if active == *index {
+                        if closed.iter().all(|c| *c) {
+                            closed[*index] = false;
+                            tabs[*index].load_url(newtab_url).ok();
+                            urls[*index] = newtab_url.to_string();
+                            titles[*index] = "New Tab".into();
+                        }
+                        if active == *index || closed[active] {
                             if let Some(next) = closed.iter().position(|c| !c) {
                                 active = activate_tab(next, &tabs, &toolbar, &urls);
                             }
@@ -918,22 +945,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                     if let crate::protocol::Command::ModelUse { provider } = &cmd {
-                        let msg = local_model.use_provider(provider);
-                        let ok = msg.contains("switched to");
-                        controller.log_command(&cmd, ok);
-                        if ok {
-                            if let Ok(mut w) = model_writer.lock() {
-                                let _ = std::io::Write::write_all(
-                                    &mut *w,
-                                    crate::local_model::LocalModel::reload_command().as_bytes(),
-                                );
-                            }
-                        }
+                        let result = local_model.use_provider(provider);
+                        controller.log_command(&cmd, result.is_ok());
                         push_model_status(&model_panel, &local_model);
-                        let _ = reply.send(if ok {
-                            crate::protocol::Response::Ok { message: msg }
-                        } else {
-                            crate::protocol::Response::Error { message: msg }
+                        let _ = reply.send(match result {
+                            Ok(msg) => crate::protocol::Response::Ok { message: msg },
+                            Err(msg) => crate::protocol::Response::Error { message: msg },
                         });
                         return;
                     }
@@ -963,6 +980,9 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let fx = (x - v.x) as f64 / v.width.max(1) as f64;
                         let fy = (y - v.y) as f64 / v.height.max(1) as f64;
                         let _ = tabs[active].evaluate_script(&agent_cursor_js(fx, fy));
+                    }
+                    if matches!(cmd, crate::protocol::Command::Scroll { .. }) {
+                        layout_cache.dirty = true;
                     }
                     if let crate::protocol::Command::ScrollDom { dx, dy } = &cmd {
                         let js = format!("window.scrollBy({dx},{dy});");
@@ -1019,6 +1039,15 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         pending_type = Some(text.clone());
                     }
                     if let Some(id) = resolved_id {
+                        if layout_cache.dirty
+                            || layout_cache.tab != active
+                            || layout_cache.url != urls[active]
+                        {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "layout is stale; call browser_layout {refresh:true}".into(),
+                            });
+                            return;
+                        }
                         let found = layout_cache.entries.iter().find(|e| e.id == id).cloned();
                         match found {
                             Some(el) => {
@@ -1074,8 +1103,13 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     let outside_click = matches!(cmd, crate::protocol::Command::Click { x, y, .. }
                         if crate::policy::policy().allow_outside_viewport
                             && !controller.viewport().contains(x, y));
-                    let needs_check = matches!(cmd,
-                        crate::protocol::Command::Click { .. } | crate::protocol::Command::Type { .. })
+                    let key_writes = matches!(&cmd,
+                        crate::protocol::Command::Key { key }
+                            if crate::control::key_produces_text(key));
+                    let needs_check = (matches!(cmd,
+                        crate::protocol::Command::Click { .. }
+                            | crate::protocol::Command::Type { .. })
+                        || key_writes)
                         && !outside_click;
                     if needs_check {
                         let relative = match &cmd {
@@ -1120,12 +1154,29 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     let failed = matches!(response, crate::protocol::Response::Error { .. });
                     if !failed {
                         if let Some(text) = then_type {
-                            let typed = controller.execute(
-                                &crate::protocol::Command::Type { text },
-                                &tabs[tab],
-                                is_password,
-                            );
-                            let _ = reply.send(typed);
+                            // The click may have just focused a password field.
+                            // Re-check the active element before typing instead
+                            // of reusing the pre-click classification.
+                            let slot = Arc::new(Mutex::new(Some((
+                                crate::protocol::Command::Type { text }, reply,
+                            ))));
+                            let slot_cb = slot.clone();
+                            let proxy_cb = ui_proxy.clone();
+                            let js = crate::control::Controller::password_check_js(None);
+                            if let Err(e) = tabs[tab].evaluate_script_with_callback(&js, move |value| {
+                                if let Some((cmd, reply)) = slot_cb.lock().unwrap().take() {
+                                    let _ = proxy_cb.send_event(crate::ipc::UserEvent::PasswordChecked {
+                                        cmd, reply, is_password: value.contains("true"),
+                                        tab, then_type: None,
+                                    });
+                                }
+                            }) {
+                                if let Some((_, reply)) = slot.lock().unwrap().take() {
+                                    let _ = reply.send(crate::protocol::Response::Error {
+                                        message: format!("password check failed: {e}"),
+                                    });
+                                }
+                            }
                             return;
                         }
                     }
@@ -1178,14 +1229,16 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "close" => {
                         if let Some(i) = index.filter(|i| *i < tabs.len() && !closed[*i]) {
-                            if closed.iter().filter(|c| !**c).count() <= 1
-                                && !crate::policy::policy().allow_close_last_tab
-                            {
-                                return;
-                            }
                             closed[i] = true;
                             tabs[i].set_visible(false).ok();
-                            if active == i {
+                            if closed.iter().all(|c| *c) {
+                                // Never leave a blank page with a hidden active tab.
+                                closed[i] = false;
+                                tabs[i].load_url(newtab_url).ok();
+                                urls[i] = newtab_url.to_string();
+                                titles[i] = "New Tab".into();
+                            }
+                            if active == i || closed[active] {
                                 if let Some(next) = closed.iter().position(|c| !c) {
                                     active = activate_tab(next, &tabs, &toolbar, &urls);
                                 }
@@ -1207,14 +1260,36 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "newtab" => {
                         let next = if let Some(i) = closed.iter().position(|c| *c) {
+                            tabs[i].load_url(newtab_url).ok();
+                            urls[i] = newtab_url.to_string();
+                            titles[i] = "New Tab".into();
+                            closed[i] = false;
                             i
                         } else {
-                            (active + 1) % tabs.len()
+                            // Never overwrite an already-open tab.
+                            match build_tab(
+                                &mut context, &window, newtab_url, tabs.len(),
+                                tab_proxy_template.clone(), tab_ipc_template.clone(),
+                                &term_dir, &downloads, &logs,
+                            ) {
+                                Ok(tab) => {
+                                    let i = tabs.len();
+                                    let _ = tab.set_visible(true);
+                                    tabs.push(tab);
+                                    titles.push("New Tab".into());
+                                    urls.push(newtab_url.to_string());
+                                    closed.push(false);
+                                    i
+                                }
+                                Err(e) => {
+                                    eprintln!("agent-browser: could not create tab: {e}");
+                                    return;
+                                }
+                            }
                         };
-                        closed[next] = false;
-                        let _ = tabs[next].load_url(newtab_url);
-                        urls[next] = newtab_url.to_string();
-                        titles[next] = "New Tab".into();
+                        controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
+                            &terminal, &divider, &model_panel, &model_divider, model_size,
+                            &toolbar, &tabs, &tab_strip, origin, scale));
                         active = activate_tab(next, &tabs, &toolbar, &urls);
                         layout_cache.dirty = true;
                         refresh_tabs(&tab_strip, &titles, &urls, active, &closed);
@@ -1347,15 +1422,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "model_use" => {
                         if let Some(provider) = value {
-                            let msg = local_model.use_provider(&provider);
-                            if msg.contains("switched to") {
-                                if let Ok(mut w) = model_writer.lock() {
-                                    let _ = std::io::Write::write_all(
-                                        &mut *w,
-                                        crate::local_model::LocalModel::reload_command().as_bytes(),
-                                    );
-                                }
-                            }
+                            let _ = local_model.use_provider(&provider);
                             push_model_status(&model_panel, &local_model);
                         }
                     }

@@ -12,6 +12,18 @@ use crate::protocol::{action_point, Command, MouseButton, Response, Viewport};
 
 pub const WINDOW_TITLE: &str = "Agent Browser — embedded OpenCode";
 
+/// A key that can write text into the focused field. These must pass the
+/// same credential check as `browser_type`.
+pub fn key_produces_text(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    if k.chars().count() == 1 {
+        return true;
+    }
+    let pastes = k.split('+').any(|p| p.trim() == "v");
+    let modifier = k.contains("ctrl") || k.contains("meta") || k.contains("alt");
+    pastes && modifier
+}
+
 /// Map a friendly key name to an enigo key. Returns None for printable
 /// characters, which are handled as `Key::Unicode`.
 fn named_key(name: &str) -> Option<Key> {
@@ -120,27 +132,32 @@ impl Controller {
 
     /// Build the in-page check. The result is delivered through a WebView2
     /// callback, which must NOT be awaited on the tao UI thread (deadlock).
+    /// Uses DOM primitives captured at document start in a non-configurable
+    /// global so a hostile page cannot simply monkey-patch them. This is a
+    /// hardening measure, not a true isolated-world boundary.
     /// Fail closed: any unknown/iframe/shadow target is treated as sensitive.
-    /// Coordinates are physical screen pixels relative to the viewport, so the
-    /// page converts them with devicePixelRatio before calling elementFromPoint.
     pub fn password_check_js(relative: Option<(i32, i32)>) -> String {
+        let probe = "(function(e,D){if(!e)return true;\
+            var t=D?D.tag(e):e.tagName;\
+            if(t==='IFRAME'||e.shadowRoot)return true;\
+            if(D?D.closed(e):!!(window.__abClosedHosts&&window.__abClosedHosts.has(e)))return true;\
+            return false;})";
         match relative {
             Some((x, y)) => format!(
-                "(function(){{var d=window.devicePixelRatio||1;\
-                 var e=document.elementFromPoint({x}/d,{y}/d);\
-                 if(!e)return true;\
-                 if(e.tagName==='IFRAME'||e.shadowRoot)return true;\
-                 if(window.__abClosedHosts&&window.__abClosedHosts.has(e))return true;\
-                 if(e.tagName.indexOf('-')>=0)return true;\
-                 return !!(e.closest&&e.closest('input[type=password]'));}})()"
+                "(function(){{var d=window.devicePixelRatio||1;var D=window.__abDom;\
+                 var e=D?D.efp({x}/d,{y}/d):document.elementFromPoint({x}/d,{y}/d);\
+                 if({probe}(e,D))return true;\
+                 var c=D?D.closest:Element.prototype.closest;\
+                 return !!(e.closest&&c.call(e,'input[type=password]'));}})()"
             ),
-            None => "(function(){var e=document.activeElement;\
-                      if(!e)return true;\
-                      if(e.tagName==='IFRAME'||e.shadowRoot)return true;\
-                      if(window.__abClosedHosts&&window.__abClosedHosts.has(e))return true;\
-                      if(e.tagName.indexOf('-')>=0)return true;\
-                      return !!(e.tagName==='INPUT'&&e.type==='password');})()"
-                .to_string(),
+            None => format!(
+                "(function(){{var D=window.__abDom;\
+                 var e=D?D.active():document.activeElement;\
+                 if({probe}(e,D))return true;\
+                 var t=D?D.tag(e):e.tagName;\
+                 var ty=D?D.type(e):e.type;\
+                 return !!(t==='INPUT'&&ty==='password');}})()"
+            ),
         }
     }
 
@@ -333,7 +350,13 @@ impl Controller {
                     Response::Error { message: "typing failed".into() }
                 }
             }
-            Command::Key { key } => self.dispatch_key(key),
+            Command::Key { key } => {
+                if is_password && !crate::policy::policy().allow_password_entry {
+                    Response::Error { message: "refused: password field".into() }
+                } else {
+                    self.dispatch_key(key)
+                }
+            }
             Command::ListTabs => Response::Tabs {
                 tabs: vec![crate::protocol::TabInfo {
                     index: 0,

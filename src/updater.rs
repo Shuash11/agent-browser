@@ -116,13 +116,17 @@ pub fn download_verified(info: &ReleaseInfo, path: &Path) -> Result<(), String> 
     }
     drop(file);
 
-    if let Some(expected) = &info.sha256 {
-        let bytes = fs::read(path).map_err(|e| format!("hash read failed: {e}"))?;
-        let actual = hex(Sha256::digest(&bytes).to_vec());
-        if !actual.eq_ignore_ascii_case(expected) {
-            let _ = fs::remove_file(path);
-            return Err(format!("SHA-256 mismatch: {actual} != {expected}"));
-        }
+    // Never execute an installer whose integrity could not be verified.
+    let expected = info.sha256.as_deref().unwrap_or("");
+    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let _ = fs::remove_file(path);
+        return Err("release has no valid SHA-256 digest; refusing to verify update".into());
+    }
+    let bytes = fs::read(path).map_err(|e| format!("hash read failed: {e}"))?;
+    let actual = hex(Sha256::digest(&bytes).to_vec());
+    if !actual.eq_ignore_ascii_case(expected) {
+        let _ = fs::remove_file(path);
+        return Err(format!("SHA-256 mismatch: {actual} != {expected}"));
     }
     Ok(())
 }

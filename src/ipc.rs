@@ -92,48 +92,62 @@ async fn read_line<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Result<V
 
 /// GUI side: accept one command per connection, dispatch to the event loop,
 /// then write the response. Runs until the process exits.
-pub async fn serve(proxy: tao::event_loop::EventLoopProxy<UserEvent>) -> Result<(), String> {
+pub async fn serve(proxy: tao::event_loop::EventLoopProxy<UserEvent>) {
     loop {
-        let mut server = ServerOptions::new()
+        let mut server = match ServerOptions::new()
             .reject_remote_clients(true)
             .create(pipe_name())
-            .map_err(|e| format!("pipe create failed: {e}"))?;
+        {
+            Ok(server) => server,
+            Err(e) => {
+                eprintln!("agent-browser pipe create error: {e}");
+                continue;
+            }
+        };
         if let Err(e) = server.connect().await {
             eprintln!("agent-browser IPC connect error: {e}");
             continue;
         }
-        let line = match read_line(&mut server).await {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("agent-browser IPC read error: {e}");
-                continue;
+        // Each client is handled independently. A client that connects but
+        // never finishes its line must not block all other MCP calls.
+        let event_proxy = proxy.clone();
+        tokio::spawn(async move {
+            let line = match tokio::time::timeout(Duration::from_secs(10), read_line(&mut server)).await {
+                Ok(Ok(l)) => l,
+                Ok(Err(e)) => {
+                    eprintln!("agent-browser IPC read error: {e}");
+                    return;
+                }
+                Err(_) => {
+                    eprintln!("agent-browser IPC read timed out; dropping client");
+                    return;
+                }
+            };
+            let cmd: Command = match serde_json::from_slice(&line) {
+                Ok(c) => c,
+                Err(e) => {
+                    let msg = format!("invalid command JSON: {e}");
+                    let _ = server.write_all(msg.as_bytes()).await;
+                    let _ = server.write_all(b"\n").await;
+                    return;
+                }
+            };
+            let (tx, rx) = oneshot::channel();
+            if event_proxy.send_event(UserEvent::Ipc { cmd, reply: tx }).is_err() {
+                return; // event loop gone
             }
-        };
-        let cmd: Command = match serde_json::from_slice(&line) {
-            Ok(c) => c,
-            Err(e) => {
-                let msg = format!("invalid command JSON: {e}");
-                let _ = server.write_all(msg.as_bytes()).await;
+            let reply = tokio::time::timeout(Duration::from_secs(180), rx).await;
+            let response = match reply {
+                Ok(Ok(response)) => response,
+                Ok(Err(_)) => Response::Error { message: "GUI dropped the request".into() },
+                Err(_) => Response::Error { message: "GUI reply timed out".into() },
+            };
+            if let Ok(json) = serde_json::to_vec(&response) {
+                let _ = server.write_all(&json).await;
                 let _ = server.write_all(b"\n").await;
-                continue;
             }
-        };
-        let (tx, rx) = oneshot::channel();
-        if proxy.send_event(UserEvent::Ipc { cmd, reply: tx }).is_err() {
-            break; // event loop gone
-        }
-        let reply = tokio::time::timeout(Duration::from_secs(180), rx).await;
-        let response = match reply {
-            Ok(Ok(response)) => response,
-            Ok(Err(_)) => Response::Error { message: "GUI dropped the request".into() },
-            Err(_) => Response::Error { message: "GUI reply timed out".into() },
-        };
-        if let Ok(json) = serde_json::to_vec(&response) {
-            let _ = server.write_all(&json).await;
-            let _ = server.write_all(b"\n").await;
-        }
+        });
     }
-    Ok(())
 }
 
 /// MCP side: send one command to the GUI and await its response.
