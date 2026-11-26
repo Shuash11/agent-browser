@@ -30,6 +30,19 @@ Use the MCP tools provided by the `agent-browser` server:
 - `browser_dock` — dock the terminal left or bottom when the user asks
 - `browser_screenshot` — capture the page viewport to a PNG path. Use **only** to verify visual state or for canvas/images/rendering problems; do not use it just to locate buttons or read text. Screenshots cost far more tokens than text.
 
+## Operator recipe (follow exactly)
+
+Do not invent strategies. Use these fixed recipes:
+
+1. **Search:** call `browser_search {"query":"..."}` — never build a search URL yourself.
+2. **Read a page:** call `browser_page_text {}`; use `browser_layout {"refresh":false}` only for controls.
+3. **Click:** call `browser_click_id {"id":"eN"}` with an ID from `browser_layout`.
+4. **Stale ID:** if a click/type ID is rejected, call `browser_layout {"refresh":true}`, then retry with the new ID.
+5. **Hover:** call `browser_hover {"id":"eN"}`, then `browser_layout {"refresh":true}`, then click the revealed menu by ID.
+6. **Fill a form:** `browser_type_id {"id":"eN","text":"..."}` then `browser_key {"key":"Enter"}`.
+7. **Unsure about arguments:** call `browser_help {"tool":"browser_click_id"}` — it returns the exact JSON shape.
+8. **Never** type a credential. That is the one hard block.
+
 ## Policy-driven scope rules
 
 The harness is flexible: limits live in `agent-policy.json` beside the executable, not hardcoded in the agent. Call `browser_policy` to see the active values; `browser_policy {reload:true}` re-reads the file without a restart. The user controls that file; never edit it yourself.
