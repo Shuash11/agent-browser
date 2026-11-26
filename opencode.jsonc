@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "instructions": ["HARNESS.md"],
   "model": "nvidia-glm/glm-5.3-flash",
   "providers": {
     "nvidia-glm": {

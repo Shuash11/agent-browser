@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "instructions": ["HARNESS.md"],
   "model": "local/local-model",
   "providers": {
     "nvidia-glm": {

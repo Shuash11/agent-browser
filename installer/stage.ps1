@@ -14,6 +14,7 @@ $files = @(
   "runtime/llama-cpu.zip",
   "runtime/llama-cpu.sha256",
   "AGENTS.md",
+  "HARNESS.md",
   "README.md",
   "DESIGN.md",
   "LICENSE",
