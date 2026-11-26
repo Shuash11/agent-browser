@@ -62,7 +62,7 @@ jobs:
           } else {
             gh release create $tag --repo Shuash11/agent-browser --verify-tag `
               --title "Agent Browser $tag" `
-              --notes "Agent Browser $tag`n`n- Lucide icons across the toolbar, tab strip, and New Tab shortcuts`n- Custom app icon in the installer and desktop/Start Menu shortcuts`n- macOS dark theme`n- Layout cache`n- Text tools`n- Tab close`n- Updater`n- Custom source`n`nPrerequisites: Windows 11, WebView2, OpenCode on PATH, NVIDIA_API_KEY in environment." `
+              --notes "Agent Browser $tag`n`nHarness identity injection:`n- Adds HARNESS.md instructions describing the embedded Agent Browser runtime.`n- opencode-harness.cmd sets AGENT_BROWSER_HARNESS=1 before launching OpenCode.`n- All four OpenCode configs include HARNESS.md instructions.`n- Identity and config are scoped to OpenCode started from the app directory via the wrapper; plain opencode in another project folder loads neither.`n- All 32 browser_* MCP tools remain available.`n- The installer stages HARNESS.md alongside AGENTS.md and the four configs.`n`nPrerequisites: Windows 11, WebView2, OpenCode on PATH, and NVIDIA_API_KEY in the environment." `
               $asset
           }
           if ($LASTEXITCODE -ne 0) { throw 'GitHub release step failed' }
