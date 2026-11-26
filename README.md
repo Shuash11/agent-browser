@@ -69,8 +69,9 @@ Edit `agent-policy.json` next to `agent-browser.exe` to control what the agent m
 | `allow_close_last_tab` | `true` | Let the agent close the last remaining tab |
 | `allow_new_tabs` | `true` | Let the agent open new tabs |
 | `allow_url_navigation` | `true` | Let the agent navigate to any parseable URL |
+| `fresh_layout_actions` | `true` | Rescan the DOM immediately before acting on a layout ID |
 
-Changes take effect with `browser_policy {reload:true}` — no restart needed. Missing or invalid values fall back to the defaults above.
+Changes take effect with `browser_policy {reload:true}` — no restart needed. Missing or invalid values fall back to the defaults above. With `fresh_layout_actions` on, `browser_click_id` and `browser_type_id` rescan the DOM before acting, so scrolling never leaves them using stale coordinates.
 
 ## Behavior and limits
 

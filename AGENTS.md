@@ -37,7 +37,7 @@ Do not invent strategies. Use these fixed recipes:
 1. **Search:** call `browser_search {"query":"..."}` — never build a search URL yourself.
 2. **Read a page:** call `browser_page_text {}`; use `browser_layout {"refresh":false}` only for controls.
 3. **Click:** call `browser_click_id {"id":"eN"}` with an ID from `browser_layout`.
-4. **Stale ID:** if a click/type ID is rejected, call `browser_layout {"refresh":true}`, then retry with the new ID.
+4. **Stale ID:** `browser_click_id` / `browser_type_id` rescan automatically while `fresh_layout_actions` is on. If an ID is rejected, call `browser_layout {"refresh":true}`, then retry with the new ID.
 5. **Hover:** call `browser_hover {"id":"eN"}`, then `browser_layout {"refresh":true}`, then click the revealed menu by ID.
 6. **Fill a form:** `browser_type_id {"id":"eN","text":"..."}` then `browser_key {"key":"Enter"}`.
 7. **Unsure about arguments:** call `browser_help {"tool":"browser_click_id"}` — it returns the exact JSON shape.

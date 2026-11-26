@@ -215,6 +215,35 @@ fn pack(r: Result<Response, String>) -> Result<String, McpError> {
     }
 }
 
+/// Should ID-based actions rescan the DOM first? Read from the GUI-owned
+/// policy so the bridge and GUI agree on the active value.
+async fn fresh_layout_enabled() -> Result<bool, McpError> {
+    let text = pack(ipc::call(Command::GetPolicy { reload: false }).await)?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| McpError::internal_error(format!("bad policy JSON: {e}"), None))?;
+    Ok(value.get("fresh_layout_actions").and_then(|v| v.as_bool()).unwrap_or(true))
+}
+
+/// Resolve a stable layout ID to current screen coordinates via a fresh scan.
+async fn fresh_coords(id: &str) -> Result<(i32, i32), McpError> {
+    let layout = pack(ipc::call(Command::Layout { refresh: true }).await)?;
+    let value: serde_json::Value = serde_json::from_str(&layout)
+        .map_err(|e| McpError::internal_error(format!("bad layout JSON: {e}"), None))?;
+    let element = value
+        .get("elements")
+        .and_then(|v| v.as_array())
+        .and_then(|items| items.iter().find(|e| e.get("id").and_then(|i| i.as_str()) == Some(id)))
+        .ok_or_else(|| {
+            McpError::invalid_params(
+                format!("unknown layout id {id}; call browser_layout to list IDs"),
+                None,
+            )
+        })?;
+    let x = element.get("sx").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    let y = element.get("sy").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    Ok((x, y))
+}
+
 #[derive(Clone)]
 pub struct BrowserService;
 
@@ -318,7 +347,12 @@ impl BrowserService {
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<String, McpError> {
-        pack(ipc::call(Command::ClickId { id: p.id }).await)
+        if fresh_layout_enabled().await? {
+            let (x, y) = fresh_coords(&p.id).await?;
+            pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)
+        } else {
+            pack(ipc::call(Command::ClickId { id: p.id }).await)
+        }
     }
 
     #[tool(description = "Type into layout ID. {\"id\":\"e5\",\"text\":\"hello\"}")]
@@ -326,7 +360,16 @@ impl BrowserService {
         &self,
         Parameters(p): Parameters<TypeIdParams>,
     ) -> Result<String, McpError> {
-        pack(ipc::call(Command::TypeId { id: p.id, text: p.text }).await)
+        if fresh_layout_enabled().await? {
+            let (x, y) = fresh_coords(&p.id).await?;
+            let clicked = pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)?;
+            if clicked.contains("\"status\":\"error\"") {
+                return Ok(clicked);
+            }
+            pack(ipc::call(Command::Type { text: p.text }).await)
+        } else {
+            pack(ipc::call(Command::TypeId { id: p.id, text: p.text }).await)
+        }
     }
 
     #[tool(description = "Read page title, URL and text. {}")]

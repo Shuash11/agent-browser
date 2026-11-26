@@ -21,6 +21,8 @@ pub struct AgentPolicy {
     pub allow_new_tabs: bool,
     /// Let the agent navigate to URLs. Default: on.
     pub allow_url_navigation: bool,
+    /// Rescan the DOM immediately before acting on a layout ID. Default: on.
+    pub fresh_layout_actions: bool,
 }
 
 impl Default for AgentPolicy {
@@ -31,6 +33,7 @@ impl Default for AgentPolicy {
             allow_close_last_tab: true,
             allow_new_tabs: true,
             allow_url_navigation: true,
+            fresh_layout_actions: true,
         }
     }
 }
@@ -72,6 +75,9 @@ fn load_policy() -> AgentPolicy {
                     }
                     if let Some(v) = value.get("allow_url_navigation").and_then(|v| v.as_bool()) {
                         parsed.allow_url_navigation = v;
+                    }
+                    if let Some(v) = value.get("fresh_layout_actions").and_then(|v| v.as_bool()) {
+                        parsed.fresh_layout_actions = v;
                     }
                     parsed
                 }
@@ -116,6 +122,7 @@ mod tests {
         assert!(p.allow_close_last_tab);
         assert!(p.allow_new_tabs);
         assert!(p.allow_url_navigation);
+        assert!(p.fresh_layout_actions);
     }
 
     #[test]

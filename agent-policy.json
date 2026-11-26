@@ -3,5 +3,6 @@
   "allow_outside_viewport": true,
   "allow_close_last_tab": true,
   "allow_new_tabs": true,
-  "allow_url_navigation": true
+  "allow_url_navigation": true,
+  "fresh_layout_actions": true
 }
