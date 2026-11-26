@@ -94,8 +94,7 @@ impl LocalModel {
 
     pub fn status(&self) -> String {
         let state = self.state();
-        let child_alive = self.inner.lock().unwrap().child.is_some();
-        let alive = child_alive && Self::healthy();
+        let alive = self.child_alive() && Self::healthy();
         let mut value = serde_json::to_value(&state).unwrap_or_default();
         value["port"] = json!(PORT);
         value["model_id"] = json!(MODEL_ID);
@@ -262,11 +261,13 @@ impl LocalModel {
                 .and_then(|text| serde_json::from_str(&text).ok())
                 .unwrap_or_else(|| template_json.clone());
             config["model"] = json!(model);
-            config
+            let root = config
                 .as_object_mut()
-                .ok_or_else(|| "config is not an object".to_string())?
-                .entry("providers")
-                .or_insert_with(|| json!({}))["local"] = local_provider.clone();
+                .ok_or_else(|| "config is not an object".to_string())?;
+            if !root.get("providers").map(|v| v.is_object()).unwrap_or(false) {
+                root.insert("providers".into(), json!({}));
+            }
+            root["providers"]["local"] = local_provider.clone();
             let tmp = dest.with_extension("jsonc.tmp");
             std::fs::write(&tmp, serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
@@ -313,5 +314,26 @@ mod tests {
         let dir = std::env::temp_dir();
         let m = LocalModel::new(dir);
         assert!(m.load("C:\\definitely\\missing.gguf").is_err());
+    }
+
+    #[test]
+    fn provider_switch_preserves_custom_config() {
+        let dir = std::env::temp_dir().join(format!("ab-merge-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(dir.join(".opencode"));
+        std::fs::write(
+            dir.join("opencode.cloud.jsonc"),
+            r#"{"model":"nvidia-glm/glm-5.3-flash","providers":{"local":{"name":"Local"}}}"#,
+        ).unwrap();
+        std::fs::write(
+            dir.join("opencode.jsonc"),
+            r#"{"model":"old","my_custom_agent":{"keep":true},"providers":{}}"#,
+        ).unwrap();
+        let m = LocalModel::new(dir.clone());
+        m.merge_config("cloud").unwrap();
+        let text = std::fs::read_to_string(dir.join("opencode.jsonc")).unwrap();
+        let value: Value = serde_json::from_str(&text).unwrap();
+        assert!(value.get("my_custom_agent").is_some());
+        assert_eq!(value.get("model").unwrap(), "nvidia-glm/glm-5.3-flash");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

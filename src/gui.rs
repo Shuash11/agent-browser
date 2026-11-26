@@ -433,6 +433,7 @@ try {
   var activeGet = Object.getOwnPropertyDescriptor(Document.prototype,'activeElement').get;
   var tagGet = Object.getOwnPropertyDescriptor(Element.prototype,'tagName').get;
   var typeGet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'type').get;
+  var shadowGet = Object.getOwnPropertyDescriptor(Element.prototype,'shadowRoot').get;
   var efp = doc.elementFromPoint.bind(doc);
   var closest = Element.prototype.closest;
   var closed = function(e){try{return window.__abClosedHosts.has(e);}catch(x){return true;}};
@@ -440,6 +441,7 @@ try {
     active:function(){return activeGet.call(doc);},
     tag:function(e){return tagGet.call(e);},
     type:function(e){return typeGet.call(e);},
+    shadow:function(e){return shadowGet.call(e);},
     efp:function(x,y){return efp(x,y);},
     closest:closest,
     closed:closed
@@ -1737,4 +1739,27 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         }
         let _ = (&terminal, &divider, &model_panel, &model_divider, &toolbar, &tabs, &tab_strip, &session, &context);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::navigation_url;
+
+    #[test]
+    fn bare_host_gets_https() {
+        assert_eq!(navigation_url("example.com"), Some("https://example.com/".into()));
+        assert_eq!(navigation_url("localhost:8080"), Some("https://localhost:8080/".into()));
+    }
+
+    #[test]
+    fn opaque_schemes_are_preserved() {
+        assert_eq!(navigation_url("about:blank"), Some("about:blank".into()));
+        assert_eq!(navigation_url("myapp:open"), Some("myapp:open".into()));
+        assert_eq!(navigation_url("https://example.com"), Some("https://example.com/".into()));
+    }
+
+    #[test]
+    fn empty_destination_is_rejected() {
+        assert_eq!(navigation_url("  "), None);
+    }
 }

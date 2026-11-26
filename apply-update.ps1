@@ -17,6 +17,12 @@ foreach ($i in 1..30) {
   Start-Sleep -Milliseconds 200
 }
 
+# A loaded local GGUF keeps its own server alive; stop it before updating so
+# port 8080 and its memory are released with the app.
+Get-CimInstance Win32_Process -Filter "name='llama-server.exe'" |
+  Where-Object { $_.CommandLine -match 'agent-browser' -or $_.CommandLine -match 'models\\llama' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
 if (-not (Test-Path $InstallerPath)) {
   Write-Error "Installer not found: $InstallerPath"
   exit 1

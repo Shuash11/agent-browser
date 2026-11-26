@@ -22,6 +22,17 @@ mod tests {
         assert!(!key_produces_text("Enter"));
         assert!(!key_produces_text("F5"));
     }
+
+    #[test]
+    fn password_probe_uses_captured_dom_primitives() {
+        let active = super::Controller::password_check_js(None);
+        assert!(active.contains("D.active()"));
+        assert!(active.contains("D.shadow(e)"));
+        assert!(active.contains("D.type(e)"));
+        let at_point = super::Controller::password_check_js(Some((10, 20)));
+        assert!(at_point.contains("D.efp"));
+        assert!(at_point.contains("D.closest.call"));
+    }
 }
 
 pub const WINDOW_TITLE: &str = "Agent Browser — embedded OpenCode";
@@ -160,7 +171,8 @@ impl Controller {
     pub fn password_check_js(relative: Option<(i32, i32)>) -> String {
         let probe = "(function(e,D){if(!e)return true;\
             var t=D?D.tag(e):e.tagName;\
-            if(t==='IFRAME'||e.shadowRoot)return true;\
+            var sh=D?D.shadow(e):e.shadowRoot;\
+            if(t==='IFRAME'||sh)return true;\
             if(D?D.closed(e):!!(window.__abClosedHosts&&window.__abClosedHosts.has(e)))return true;\
             return false;})";
         match relative {
@@ -168,8 +180,8 @@ impl Controller {
                 "(function(){{var d=window.devicePixelRatio||1;var D=window.__abDom;\
                  var e=D?D.efp({x}/d,{y}/d):document.elementFromPoint({x}/d,{y}/d);\
                  if({probe}(e,D))return true;\
-                 var c=D?D.closest:Element.prototype.closest;\
-                 return !!(e.closest&&c.call(e,'input[type=password]'));}})()"
+                 return !!(D?D.closest.call(e,'input[type=password]')
+                            :(e.closest&&e.closest('input[type=password]')));}})()"
             ),
             None => format!(
                 "(function(){{var D=window.__abDom;\
