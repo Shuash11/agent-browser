@@ -41,10 +41,21 @@ fn navigation_url(raw: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
+    // RFC-style opaque schemes (myapp:open, javascript:, intent:) are passed
+    // through. A host:port or ordinary host is not a scheme and gets https://.
     let has_scheme = trimmed.contains("://")
-        || ["about:", "data:", "mailto:", "tel:", "file:"]
-            .iter()
-            .any(|p| trimmed.to_ascii_lowercase().starts_with(p));
+        || trimmed
+            .find(':')
+            .map(|i| {
+                let scheme = &trimmed[..i];
+                let rest = &trimmed[i + 1..];
+                !scheme.is_empty()
+                    && scheme.chars().next().unwrap().is_ascii_alphabetic()
+                    && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+                    && !scheme.contains('.')
+                    && !rest.chars().all(|c| c.is_ascii_digit())
+            })
+            .unwrap_or(false);
     let candidate = if has_scheme {
         trimmed.to_string()
     } else {
@@ -192,6 +203,54 @@ fn serve_abterm(assets: &Path, request: &wry::http::Request<Vec<u8>>) -> wry::ht
         .unwrap()
 }
 
+/// Harness-owned regions the agent must not click even when outside-viewport
+/// coordinates are enabled: terminal, window header, tab strip, model panel.
+fn harness_chrome_rects(
+    dock: &str,
+    term_size: i32,
+    win_w: i32,
+    win_h: i32,
+    model_size: i32,
+    origin: tao::dpi::PhysicalPosition<i32>,
+    scale: f64,
+) -> Vec<crate::protocol::Viewport> {
+    let ph = |v: i32| (v as f64 * scale) as i32;
+    let ox = origin.x;
+    let oy = origin.y;
+    let mut rects = vec![
+        // window header (traffic lights, Updates, + Model, Dock)
+        crate::protocol::Viewport { x: ox, y: oy, width: ph(win_w), height: ph(36) },
+        // tab strip
+        crate::protocol::Viewport {
+            x: ox + ph(win_w - TAB_W), y: oy,
+            width: ph(TAB_W), height: ph(win_h),
+        },
+    ];
+    if dock == "left" {
+        rects.push(crate::protocol::Viewport {
+            x: ox, y: oy, width: ph(term_size), height: ph(win_h),
+        });
+        if model_size > 0 {
+            rects.push(crate::protocol::Viewport {
+                x: ox, y: oy + ph(win_h - model_size),
+                width: ph(term_size), height: ph(model_size),
+            });
+        }
+    } else {
+        rects.push(crate::protocol::Viewport {
+            x: ox, y: oy + ph(win_h - term_size),
+            width: ph(win_w - TAB_W), height: ph(term_size),
+        });
+        if model_size > 0 {
+            rects.push(crate::protocol::Viewport {
+                x: ox + ph(win_w - TAB_W - model_size), y: oy + ph(win_h - term_size),
+                width: ph(model_size), height: ph(term_size),
+            });
+        }
+    }
+    rects
+}
+
 fn push_model_status(panel: &wry::WebView, model: &crate::local_model::LocalModel) {
     if let Ok(js) = serde_json::to_string(&model.status()) {
         let _ = panel.evaluate_script(&format!("window.__setModelStatus({js})"));
@@ -232,8 +291,11 @@ fn build_tab(
             true
         })
         .with_download_completed_handler(move |url, path, ok| {
-            let line = format!("{{\"url\":{:?},\"path\":{:?},\"ok\":{}}}\n", url,
-                path.as_ref().map(|p| p.to_string_lossy().to_string()), ok);
+            let line = format!("{}\n", serde_json::json!({
+                "url": url,
+                "path": path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                "ok": ok,
+            }));
             let _ = fs::OpenOptions::new().create(true).append(true)
                 .open(lg_dir.join("downloads.jsonl"))
                 .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
@@ -389,8 +451,15 @@ Element.prototype.attachShadow = function (init) {
   return orig.call(this, init);
 };
 try {
-  new MutationObserver(function () {
-    window.chrome.webview.postMessage(JSON.stringify({ type: 'layout_changed' }));
+  new MutationObserver(function (records) {
+    var external = false;
+    for (var i = 0; i < records.length; i++) {
+      var t = records[i].target;
+      if (t && t.id && t.id.indexOf('__ab') === 0) continue;
+      external = true;
+      break;
+    }
+    if (external) window.chrome.webview.postMessage(JSON.stringify({ type: 'layout_changed' }));
   }).observe(document.documentElement, {
     childList: true, subtree: true, attributes: true, characterData: true
   });
@@ -624,7 +693,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
         .with_custom_protocol("abterm".into(), move |_id, request| {
             serve_abterm(&model_div_assets, &request)
         })
-        .with_url("http://abterm.localhost/divider.html")
+        .with_url("http://abterm.localhost/divider.html?orientation=vertical")
         .with_ipc_handler(move |request| {
             if let Ok(msg) = serde_json::from_str::<serde_json::Value>(request.body()) {
                 if msg.get("type").and_then(|v| v.as_str()) == Some("split") {
@@ -710,9 +779,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
             }
             tao::event::Event::WindowEvent {
-                event: tao::event::WindowEvent::ScaleFactorChanged { scale_factor, .. }, ..
+                event: tao::event::WindowEvent::ScaleFactorChanged { scale_factor, new_inner_size }, ..
             } => {
                 scale = scale_factor;
+                win_w = (new_inner_size.width as f64 / scale) as i32;
+                win_h = (new_inner_size.height as f64 / scale) as i32;
+                origin = window.inner_position().unwrap_or(origin);
                 layout_cache.dirty = true;
                 controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                     &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
@@ -758,6 +830,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         closed[*index] = true;
                         tabs[*index].set_visible(false).ok();
+                        tabs[*index].load_url("about:blank").ok();
                         if closed.iter().all(|c| *c) {
                             closed[*index] = false;
                             tabs[*index].load_url(newtab_url).ok();
@@ -821,6 +894,12 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         if !policy.allow_new_tabs {
                             let _ = reply.send(crate::protocol::Response::Error {
                                 message: "new tabs are disabled in agent-policy.json".into(),
+                            });
+                            return;
+                        }
+                        if url.is_some() && !policy.allow_url_navigation {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "URL navigation is disabled in agent-policy.json".into(),
                             });
                             return;
                         }
@@ -932,7 +1011,6 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         return;
                     }
                     if let crate::protocol::Command::ModelLoad { path } = &cmd {
-                        controller.log_command(&cmd, true);
                         let model = local_model.clone();
                         let target = path.clone();
                         let proxy = ui_proxy.clone();
@@ -961,6 +1039,41 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = reply.send(crate::protocol::Response::Ok { message: msg });
                         return;
                     }
+                    if let crate::protocol::Command::HoverId { id } = &cmd {
+                        let stale = layout_cache.dirty
+                            || layout_cache.tab != active
+                            || layout_cache.url != urls[active];
+                        controller.log_command(&cmd, !stale);
+                        if stale {
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "layout is stale; call browser_layout {refresh:true}".into(),
+                            });
+                            return;
+                        }
+                        match layout_cache.entries.iter().find(|e| e.id == *id).cloned() {
+                            Some(el) => {
+                                let result = controller.execute(
+                                    &crate::protocol::Command::Move { x: el.sx, y: el.sy },
+                                    &tabs[active], false,
+                                );
+                                layout_cache.dirty = true;
+                                let _ = reply.send(match result {
+                                    crate::protocol::Response::Error { message } => {
+                                        crate::protocol::Response::Error { message }
+                                    }
+                                    _ => crate::protocol::Response::Ok {
+                                        message: format!("hovered {id}; call browser_layout {{refresh:true}}"),
+                                    },
+                                });
+                            }
+                            None => {
+                                let _ = reply.send(crate::protocol::Response::Error {
+                                    message: format!("unknown layout id: {id}; call browser_layout"),
+                                });
+                            }
+                        }
+                        return;
+                    }
                     if let crate::protocol::Command::Dock { mode } = &cmd {
                         let valid = matches!(mode.as_str(), "left" | "bottom" | "toggle");
                         controller.log_command(&cmd, valid);
@@ -974,11 +1087,29 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = reply.send(crate::protocol::Response::Ok { message: "dock requested".into() });
                         return;
                     }
+                    // Even with unrestricted coordinates, harness chrome stays
+                    // user-only: terminal, window header, tab strip, model panel.
+                    if let Some((x, y)) = crate::protocol::action_point(&cmd) {
+                        let v = controller.viewport();
+                        if crate::policy::policy().allow_outside_viewport
+                            && !v.contains(x, y)
+                            && harness_chrome_rects(
+                                &dock, term_size, win_w, win_h, model_size, origin, scale,
+                            )
+                            .iter().any(|r| r.contains(x, y))
+                        {
+                            controller.log_command(&cmd, false);
+                            let _ = reply.send(crate::protocol::Response::Error {
+                                message: "that coordinate is in harness chrome; use page or toolbar tools".into(),
+                            });
+                            return;
+                        }
+                    }
                     // Virtual cursor follows every agent pointer action.
                     if let Some((x, y)) = crate::protocol::action_point(&cmd) {
                         let v = controller.viewport();
-                        let fx = (x - v.x) as f64 / v.width.max(1) as f64;
-                        let fy = (y - v.y) as f64 / v.height.max(1) as f64;
+                        let fx = (x as i64 - v.x as i64) as f64 / v.width.max(1) as f64;
+                        let fy = (y as i64 - v.y as i64) as f64 / v.height.max(1) as f64;
                         let _ = tabs[active].evaluate_script(&agent_cursor_js(fx, fy));
                     }
                     if matches!(cmd, crate::protocol::Command::Scroll { .. }) {
@@ -1115,7 +1246,8 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let relative = match &cmd {
                             crate::protocol::Command::Click { x, y, .. } => {
                                 let v = controller.viewport();
-                                Some((x - v.x, y - v.y))
+                                Some((((*x as i64 - v.x as i64).clamp(i32::MIN as i64, i32::MAX as i64)) as i32,
+                                      ((*y as i64 - v.y as i64).clamp(i32::MIN as i64, i32::MAX as i64)) as i32))
                             }
                             _ => None,
                         };
@@ -1231,6 +1363,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         if let Some(i) = index.filter(|i| *i < tabs.len() && !closed[*i]) {
                             closed[i] = true;
                             tabs[i].set_visible(false).ok();
+                            tabs[i].load_url("about:blank").ok();
                             if closed.iter().all(|c| *c) {
                                 // Never leave a blank page with a hidden active tab.
                                 closed[i] = false;
@@ -1402,7 +1535,8 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     "model_split" => {
                         if let Some(delta) = value.and_then(|v| v.parse::<i32>().ok()) {
-                            model_size = (model_size - delta).clamp(120, 600);
+                            let signed = if dock == "left" { delta } else { -delta };
+                            model_size = (model_size + signed).clamp(120, 600);
                             controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                                 &terminal, &divider, &model_panel, &model_divider, model_size,
                                 &toolbar, &tabs, &tab_strip, origin, scale));
@@ -1434,6 +1568,9 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 },
                 crate::ipc::UserEvent::ModelLoaded { result, reply } => {
                     let ok = result.is_ok();
+                    controller.log_command(
+                        &crate::protocol::Command::ModelLoad { path: String::new() }, ok,
+                    );
                     push_model_status(&model_panel, &local_model);
                     if let Some(reply) = reply {
                         let _ = reply.send(match result {
@@ -1455,7 +1592,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                 crate::ipc::UserEvent::LayoutDirty => { layout_cache.dirty = true; }
                 crate::ipc::UserEvent::UpdateCheck => {
                     let p = ui_proxy.clone();
-                    let _ = terminal.evaluate_script("window.__setUpdateStatus('Checkingâ€¦')");
+                    let _ = terminal.evaluate_script("window.__setUpdateStatus('Checking…')");
                     std::thread::spawn(move || {
                         let result = crate::updater::check_latest();
                         let _ = p.send_event(crate::ipc::UserEvent::UpdateChecked { result });
@@ -1515,7 +1652,7 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                 let app_root = root.clone();
                                 let release = info.clone();
                                 let _ = terminal.evaluate_script(
-                                    "window.__setUpdateStatus('Downloading updateâ€¦')");
+                                    "window.__setUpdateStatus('Downloading update…')");
                                 // Do NOT exit here: the updater script owns shutdown
                                 // after the download completes. Exiting now kills
                                 // this detached thread before it can install.
@@ -1573,13 +1710,23 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                     layout_cache.dirty = true;
                     let _ = terminal.evaluate_script(&format!("window.__setDock('{dock}')"));
                     let _ = divider.evaluate_script(&format!("window.__setDock('{dock}')"));
+                    let _ = model_divider.evaluate_script(
+                        &format!("window.__setModelDivider && window.__setModelDivider('{dock}')"),
+                    );
                     controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                         &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));
                     let _ = terminal.evaluate_script("window.__fit && window.__fit()");
                 }
                 crate::ipc::UserEvent::SplitDelta { delta } => {
-                    let max_size = if dock == "left" { win_w - TAB_W - 360 } else { win_h - 300 };
-                    term_size = (term_size + delta).clamp(MIN_TERM, max_size);
+                    let (min_size, max_size) = if dock == "left" {
+                        (MIN_TERM, (win_w * 32 / 100).max(MIN_TERM).min(win_w - TAB_W - 360))
+                    } else {
+                        (180, (win_h * 40 / 100).max(180).min(win_h - 300))
+                    };
+                    // In bottom dock, dragging the divider down shrinks the
+                    // bottom terminal; in left dock it grows the left panel.
+                    let signed = if dock == "left" { delta } else { -delta };
+                    term_size = (term_size + signed).clamp(min_size, max_size);
                     layout_cache.dirty = true;
                     controller.set_viewport(layout_bounds(&dock, term_size, win_w, win_h,
                         &terminal, &divider, &model_panel, &model_divider, model_size, &toolbar, &tabs, &tab_strip, origin, scale));

@@ -1,19 +1,19 @@
 # Agent Browser
 
-A local Windows desktop app with an **embedded OpenCode terminal** (xterm.js + ConPTY) and a page WebView. OpenCode controls the page through MCP over stdio. You sign in yourself; the agent can only act on the visible page area, never the terminal panel.
+A local Windows desktop app with an **embedded OpenCode terminal** (xterm.js + ConPTY) and a page WebView. OpenCode controls the page through MCP over stdio. You sign in yourself; the agent acts on web pages and can reach OS coordinates when `allow_outside_viewport` is enabled (the default), but terminal chrome is excluded.
 
 ## Layout
 
 - Terminal panel docks **left** (default, 540 px) or **bottom** (half height).
 - Drag the 8 px divider between panels to resize; the page viewport and agent coordinates update live.
 - Click **Dock: Left / Bottom** in the terminal toolbar, or call `browser_dock {mode:"left"|"bottom"|"toggle"}`.
-- The terminal runs OpenCode with cwd = repository root, so it loads the same `opencode.jsonc` and MCP servers.
-- The page panel has a **user-only toolbar**: address bar, Back, Forward, Reload, Home. Type a URL and press Enter, or click a button. Navigation is deliberately not exposed to the agent; the MCP viewport starts below the toolbar.
-- Four real tabs are available. The **right-edge tab strip** shows every open tab; click a tab (user) or call `browser_focus_tab` (agent) to switch. Each row has a × to close it; closed rows show "reopen". The agent can also call `browser_close_tab {index}`. The last open tab cannot be closed.
+- The terminal starts in a plain shell in the app directory so the app-local `opencode.jsonc` and MCP server are found. To work on another project, run `opencode-harness C:\path\to\project` — that wrapper keeps cwd at the app directory and passes your project as OpenCode's directory argument. Plain `cd` + `opencode` will not load the harness MCP config.
+- The page panel has a **toolbar**: address bar, Back, Forward, Reload, Home. The agent can also navigate via `browser_navigate` / `browser_search` and open unlimited tabs via `browser_new_tab`.
+- Tabs are created on demand. The **right-edge tab strip** shows every open tab; click a tab (user) or call `browser_focus_tab` (agent) to switch. Each row has a × to close it; closed rows show "reopen". Closing the last tab automatically opens a fresh New Tab.
 - The first tab opens an app-styled **New Tab** page with no search box: seven shortcuts — TikTok, YouTube, Facebook, Instagram, GitHub, **Edge (MSN.com)**, and **Chrome (Google.com)** — all open inside the harness page panel. A **custom source** field stores your own authorized download URL in this browser profile; no third-party downloader is bundled. URL entry stays in the toolbar address bar.
 - **Manual updates:** click "Check for updates" in the terminal header. The app queries the GitHub `v*` release, shows a dialog with **Update now / Remind me later / Skip this version**, verifies the installer's GitHub SHA-256 digest, then silently reinstalls into the current folder and relaunches. Skipped tags are remembered in `data/update-state.json`. Updates are user-only — no agent tool can check or install them.
 - The agent uses an **in-app virtual cursor**: a cyan ring drawn on the page at the agent's logical position. The page's native pointer is hidden briefly during agent actions.
-- **Terminal:** opens a plain `cmd.exe` shell in the app directory. Run `opencode` yourself (after `cd` into your target project); it is not launched automatically. The embedded agent still loads the app-local `opencode.jsonc` and MCP tools once you start it.
+- **Terminal:** opens a plain `cmd.exe` shell in the app directory. OpenCode is not launched automatically. Run `opencode-harness C:\path\to\project` to start it with the harness config and your target project.
 - **Design:** macOS dark-mode-inspired graphite surfaces, system-blue accents, rounded controls, and functional traffic-light window buttons (close / minimize / maximize) in the terminal header.
 - **Harness-side layout cache:** `browser_layout` returns every visible interactive element with a stable ID and screen coordinates. The agent then uses `browser_click_id {id}` / `browser_type_id {id,text}` — one or two calls instead of repeated pixel analysis. The cache invalidates on navigation, scroll, resize, tab switch, and DOM mutation; `browser_layout {refresh:true}` forces a rescan.
 - **Text-first perception:** `browser_page_text` and `browser_page_elements` return page content and visible controls with screen coordinates; `browser_scroll_into_view {text}` jumps to named elements. Use `browser_screenshot` only for visual verification (canvas, images, layout bugs), not for locating buttons or reading text — a 1080×1920 screenshot costs roughly 1–3k image tokens each time.
@@ -85,15 +85,16 @@ Changes take effect with `browser_policy {reload:true}` — no restart needed. M
 
 ## Verified
 
-`cargo test` (4 protocol tests), `cargo build --release`, MCP handshake + 9 tools listed,
-end-to-end click → page state change (`BUTTON A CLICKED`) → screenshot evidence,
-typed text (`HELLO`) into the text field, password-field click refused.
+`cargo test` (10 unit tests), `cargo build --release`, MCP handshake with 32 tools listed,
+end-to-end navigation, layout ID clicking, text entry, local model load/health, and
+password-field refusal verified at runtime.
 
 ## Files
 
 - `src/protocol.rs` — IPC command/response types, viewport validation
 - `src/ipc.rs` — named-pipe GUI↔MCP transport
 - `src/control.rs` — enigo input, screenshots, policy, logging
-- `src/gui.rs` — tao window + two child WebViews (tab panel + page)
-- `src/mcp.rs` — rmcp stdio server with 9 tools
+- `src/gui.rs` — tao window with terminal, model panel, toolbar, tab strip, and page WebViews
+- `src/mcp.rs` — rmcp stdio server with 32 tools
+- `opencode-harness.cmd` — start OpenCode with the harness config and your project directory
 - `tests/fixture.html`, `tests/mcp_smoke.py` — end-to-end fixtures

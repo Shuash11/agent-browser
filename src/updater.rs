@@ -104,30 +104,39 @@ pub fn download_verified(info: &ReleaseInfo, path: &Path) -> Result<(), String> 
         .header("User-Agent", "agent-browser-updater")
         .call()
         .map_err(|e| format!("download failed: {e}"))?;
-    let mut file = fs::File::create(path).map_err(|e| format!("create installer failed: {e}"))?;
+    let expected = info.sha256.as_deref().unwrap_or("");
+    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("release has no valid SHA-256 digest; refusing to verify update".into());
+    }
+    let temp = path.with_extension("download.part");
+    let mut file = fs::File::create(&temp).map_err(|e| format!("create installer failed: {e}"))?;
     let mut reader = response.body_mut().as_reader();
+    let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("download read failed: {e}"))?;
+        let n = reader.read(&mut buf).map_err(|e| {
+            let _ = fs::remove_file(&temp);
+            format!("download read failed: {e}")
+        })?;
         if n == 0 {
             break;
         }
-        file.write_all(&buf[..n]).map_err(|e| format!("download write failed: {e}"))?;
+        hasher.update(&buf[..n]);
+        file.write_all(&buf[..n]).map_err(|e| {
+            let _ = fs::remove_file(&temp);
+            format!("download write failed: {e}")
+        })?;
     }
     drop(file);
-
-    // Never execute an installer whose integrity could not be verified.
-    let expected = info.sha256.as_deref().unwrap_or("");
-    if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
-        let _ = fs::remove_file(path);
-        return Err("release has no valid SHA-256 digest; refusing to verify update".into());
-    }
-    let bytes = fs::read(path).map_err(|e| format!("hash read failed: {e}"))?;
-    let actual = hex(Sha256::digest(&bytes).to_vec());
+    let actual = hex(hasher.finalize().to_vec());
     if !actual.eq_ignore_ascii_case(expected) {
-        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(&temp);
         return Err(format!("SHA-256 mismatch: {actual} != {expected}"));
     }
+    fs::rename(&temp, path).map_err(|e| {
+        let _ = fs::remove_file(&temp);
+        format!("could not install verified download: {e}")
+    })?;
     Ok(())
 }
 

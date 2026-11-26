@@ -63,15 +63,34 @@ impl TerminalSession {
 
         thread::spawn(move || {
             let mut buf = [0u8; 4096];
+            let mut pending: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let _ = proxy.send_event(UserEvent::TermOutput { data });
+                        pending.extend_from_slice(&buf[..n]);
+                        match String::from_utf8(pending.clone()) {
+                            Ok(data) => {
+                                pending.clear();
+                                let _ = proxy.send_event(UserEvent::TermOutput { data });
+                            }
+                            Err(e) => {
+                                let valid = e.utf8_error().valid_up_to();
+                                let data = String::from_utf8_lossy(&pending[..valid]).into_owned();
+                                if !data.is_empty() {
+                                    let _ = proxy.send_event(UserEvent::TermOutput { data });
+                                }
+                                pending.drain(..valid);
+                                if pending.len() > 3 { pending.clear(); }
+                            }
+                        }
                     }
                     Err(_) => break,
                 }
+            }
+            if !pending.is_empty() {
+                let data = String::from_utf8_lossy(&pending).into_owned();
+                let _ = proxy.send_event(UserEvent::TermOutput { data });
             }
         });
 

@@ -121,6 +121,17 @@ impl LocalModel {
         if !zip.is_file() {
             return Err("bundled llama.cpp runtime is missing".into());
         }
+        let expected_path = self.root.join("runtime").join("llama-cpu.sha256");
+        let expected = std::fs::read_to_string(&expected_path)
+            .map_err(|_| "bundled runtime checksum is missing".to_string())?;
+        let expected = expected.trim().to_ascii_lowercase();
+        use sha2::{Digest, Sha256};
+        let bytes = std::fs::read(&zip).map_err(|e| format!("runtime read failed: {e}"))?;
+        let actual = Sha256::digest(&bytes)
+            .iter().map(|b| format!("{b:02x}")).collect::<String>();
+        if actual != expected {
+            return Err("bundled runtime SHA-256 mismatch; refusing to extract".into());
+        }
         let dir = exe.parent().unwrap();
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let script = format!(

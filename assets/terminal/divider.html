@@ -15,8 +15,15 @@
 <body class="horizontal">
 <div id="handle" role="separator" aria-label="Resize panels"></div>
 <script>
+  // orientation=vertical means a horizontal divider line (row-resize).
+  var initial = new URLSearchParams(location.search).get('orientation');
+  if (initial === 'vertical' || initial === 'horizontal') document.body.className = initial;
   window.__setDock = function (mode) {
     document.body.className = mode === 'bottom' ? 'vertical' : 'horizontal';
+  };
+  window.__setModelDivider = function (dock) {
+    // The model divider runs opposite to the main divider.
+    document.body.className = dock === 'bottom' ? 'horizontal' : 'vertical';
   };
   var dragging = false;
   var last = 0;

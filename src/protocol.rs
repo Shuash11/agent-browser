@@ -81,6 +81,8 @@ pub enum Command {
     ModelUse { provider: String },
     /// Stop the local model server.
     ModelStop,
+    /// Move the real cursor to a layout element atomically in the GUI.
+    HoverId { id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

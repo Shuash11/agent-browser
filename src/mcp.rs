@@ -451,27 +451,7 @@ impl BrowserService {
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<String, McpError> {
-        let layout = pack(ipc::call(Command::Layout { refresh: false }).await)?;
-        let value: serde_json::Value = serde_json::from_str(&layout)
-            .map_err(|e| McpError::internal_error(format!("bad layout: {e}"), None))?;
-        let element = value
-            .get("elements")
-            .and_then(|e| e.as_array())
-            .and_then(|items| {
-                items.iter().find(|item| {
-                    item.get("id").and_then(|v| v.as_str()) == Some(p.id.as_str())
-                })
-            })
-            .ok_or_else(|| {
-                McpError::invalid_params(
-                    format!("unknown layout id {}; call browser_layout first", p.id),
-                    None,
-                )
-            })?;
-        let x = element.get("sx").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let y = element.get("sy").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let _ = pack(ipc::call(Command::Move { x, y }).await)?;
-        pack(ipc::call(Command::Layout { refresh: true }).await)
+        pack(ipc::call(Command::HoverId { id: p.id }).await)
     }
 
     #[tool(description = "Show usage recipes and JSON examples. Example: {\"tool\":\"browser_click_id\"}")]
@@ -479,7 +459,34 @@ impl BrowserService {
         &self,
         Parameters(p): Parameters<HelpParams>,
     ) -> Result<String, McpError> {
-        Ok(help_json(p.tool.as_deref()))
+        let json = help_json(p.tool.as_deref());
+        if let Some(name) = p.tool.as_deref() {
+            let value: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+            if value.get("tools").and_then(|v| v.as_array()).map(|a| a.is_empty()).unwrap_or(true) {
+                return Err(McpError::invalid_params(
+                    format!("unknown tool: {name}; call browser_help {{}} to list all"),
+                    None,
+                ));
+            }
+        }
+        Ok(json)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{help_json, url_encode};
+
+    #[test]
+    fn query_encoding_is_stable() {
+        assert_eq!(url_encode("a b&c"), "a+b%26c");
+    }
+
+    #[test]
+    fn help_lists_every_tool() {
+        let value: serde_json::Value = serde_json::from_str(&help_json(None)).unwrap();
+        let tools = value.get("tools").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(tools.len(), 32);
     }
 }
 

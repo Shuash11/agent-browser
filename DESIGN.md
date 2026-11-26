@@ -1,4 +1,4 @@
-# Agent Browser — design specification (v0.2)
+# Agent Browser — design specification (v0.3.2)
 
 ## Direction
 macOS dark-mode-inspired: neutral graphite surfaces (#1e1e1e / #2c2c2e), system-blue accent (#0A84FF), rounded 10px controls, subtle borders and restrained shadows. Traffic-light buttons in the terminal header are functional close/minimize/maximize controls, not decoration. Chrome recedes so the page remains the visual focus.
@@ -6,9 +6,9 @@ macOS dark-mode-inspired: neutral graphite surfaces (#1e1e1e / #2c2c2e), system-
 ## Product context
 Two roles in one window:
 - **User**: signs in, drives the address bar, docks/resizes panels.
-- **Agent (OpenCode)**: sees only the page viewport through screenshots and clicks there. It never sees or edits the toolbar/terminal panel.
+- **Agent (OpenCode)**: reads pages through text-first tools and acts by layout IDs or screen coordinates. By default coordinates may leave the page, but terminal chrome (window header, terminal panel, tab strip) is excluded. Password fields remain the only hard block.
 
-Screens: terminal panel (agent session), browser toolbar (user navigation), page WebView (shared content), divider (user resize).
+Screens: terminal panel (shell / agent session), draggable model panel (local GGUF status), browser toolbar, page WebView (shared content), tab strip, dividers (user resize).
 
 ## Tokens (`assets/terminal/theme.css`)
 | Token | Value | Role |
@@ -31,12 +31,13 @@ Typography: system stack `Segoe UI Variable, Segoe UI, Inter, system-ui, sans-se
 
 ## Layout
 - Window 1600×900 default, **resizable** with min 1100×680.
-- Four page tabs share one WebContext. A 140 px tab strip sits on the far right; the agent viewport excludes it.
+- Page tabs share one WebContext and are created on demand. A 140 px tab strip sits on the far right; the agent viewport excludes it.
 - Tab 1 defaults to an app-styled New Tab page: seven site shortcuts that all navigate inside the harness — TikTok, YouTube, Facebook, Instagram, GitHub, Edge (MSN.com), Chrome (Google.com). No external app launch and no download page. Custom-source field stores a user-supplied authorized download URL in localStorage. No third-party downloader is bundled and no search input is present; URL entry belongs in the browser toolbar.
-- Tab strip rows expose focus, close (×), and reopen actions for both user and agent; the last open tab is protected.
+- Tab strip rows expose focus, close (×), and reopen actions for both user and agent. Closing the last open tab automatically opens a fresh New Tab.
 - Layout cache: one harness-side DOM scan per page state; elements receive stable IDs (`eN`) and screen-space centres. Cache invalidates on navigation, scroll, resize, dock change, tab switch, and DOM mutation.
 - Left dock: terminal `term_size` (default 540, clamped 260…w−400), divider 8px, toolbar 44px, page fills remainder.
-- Bottom dock: page top, toolbar 44px, divider 8px, terminal bottom (default h/2, clamped 180…h−300).
+- Bottom dock: page top, toolbar 44px, divider 8px, terminal and model panel in the bottom row.
+- Model panel: hidden until "+ Model" is clicked; then 220px tall in left dock (~420px wide in bottom dock) with its own draggable divider.
 - Toolbar internals: Back 32px, Forward 32px, Reload 32px, Home 32px, gaps 8px, URL flex `min-width:0`, status 16px. Padding 12px.
 - Terminal header: 36px, title 12px uppercase, subtitle 11px muted, dock button right-aligned, min 24×24 target.
 

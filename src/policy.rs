@@ -51,13 +51,36 @@ fn load_policy() -> AgentPolicy {
         return AgentPolicy::default();
     };
     match std::fs::read_to_string(&path) {
-        Ok(text) => match serde_json::from_str::<AgentPolicy>(text.trim_start_matches('\u{feff}')) {
-            Ok(parsed) => parsed,
-            Err(e) => {
-                eprintln!("agent-browser: invalid agent-policy.json ({e}); using defaults");
-                AgentPolicy::default()
+        Ok(text) => {
+            let text = text.trim_start_matches('\u{feff}');
+            match serde_json::from_str::<serde_json::Value>(text) {
+                Ok(value) => {
+                    // Apply each field independently so one bad type does not
+                    // discard the user's other (possibly restrictive) choices.
+                    let mut parsed = AgentPolicy::default();
+                    if let Some(v) = value.get("allow_password_entry").and_then(|v| v.as_bool()) {
+                        parsed.allow_password_entry = v;
+                    }
+                    if let Some(v) = value.get("allow_outside_viewport").and_then(|v| v.as_bool()) {
+                        parsed.allow_outside_viewport = v;
+                    }
+                    if let Some(v) = value.get("allow_close_last_tab").and_then(|v| v.as_bool()) {
+                        parsed.allow_close_last_tab = v;
+                    }
+                    if let Some(v) = value.get("allow_new_tabs").and_then(|v| v.as_bool()) {
+                        parsed.allow_new_tabs = v;
+                    }
+                    if let Some(v) = value.get("allow_url_navigation").and_then(|v| v.as_bool()) {
+                        parsed.allow_url_navigation = v;
+                    }
+                    parsed
+                }
+                Err(e) => {
+                    eprintln!("agent-browser: invalid agent-policy.json ({e}); using defaults");
+                    AgentPolicy::default()
+                }
             }
-        },
+        }
         Err(_) => AgentPolicy::default(),
     }
 }

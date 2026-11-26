@@ -55,7 +55,7 @@
         "type": "local",
         "command": ["./target/release/agent-browser.exe", "mcp"],
         "cwd": ".",
-        "timeout": { "startup": 45000, "execution": 60000 }
+        "timeout": { "startup": 45000, "execution": 180000 }
       }
     }
   },
@@ -64,6 +64,10 @@
     { "action": "read", "resource": "*.env.*", "effect": "ask" },
     { "action": "agent_browser_browser_screenshot", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_get_viewport", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_page_text", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_page_elements", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_scroll_dom", "resource": "*", "effect": "allow" },
+    { "action": "agent_browser_browser_scroll_into_view", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_list_tabs", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_move", "resource": "*", "effect": "allow" },
     { "action": "agent_browser_browser_click", "resource": "*", "effect": "allow" },

@@ -10,6 +10,20 @@ use wry::WebView;
 
 use crate::protocol::{action_point, Command, MouseButton, Response, Viewport};
 
+#[cfg(test)]
+mod tests {
+    use super::key_produces_text;
+
+    #[test]
+    fn text_producing_keys_are_detected() {
+        assert!(key_produces_text("a"));
+        assert!(key_produces_text("Ctrl+V"));
+        assert!(key_produces_text("Meta+v"));
+        assert!(!key_produces_text("Enter"));
+        assert!(!key_produces_text("F5"));
+    }
+}
+
 pub const WINDOW_TITLE: &str = "Agent Browser — embedded OpenCode";
 
 /// A key that can write text into the focused field. These must pass the
@@ -83,6 +97,13 @@ impl Controller {
     /// or a single printable character. Modifiers are held only for the
     /// duration of the key press.
     fn dispatch_key(&mut self, key: &str) -> Response {
+        if key == "+" {
+            return if self.enigo.key(Key::Unicode('+'), Direction::Click).is_ok() {
+                Response::Ok { message: "pressed +".into() }
+            } else {
+                Response::Error { message: "key + failed".into() }
+            };
+        }
         let mut parts: Vec<String> = key
             .split('+')
             .map(|p| p.trim().to_string())
@@ -196,6 +217,7 @@ impl Controller {
             Command::ModelLoad { .. } => "model_load",
             Command::ModelUse { .. } => "model_use",
             Command::ModelStop => "model_stop",
+            Command::HoverId { .. } => "hover_id",
         };
         let line = format!("{{\"ts\":{ts},\"action\":\"{name}\",\"ok\":{ok}}}\n");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -333,10 +355,18 @@ impl Controller {
             }
             Command::Scroll { x, y, dx, dy } => {
                 let _ = self.enigo.move_mouse(*x, *y, Coordinate::Abs);
-                if *dy != 0 && self.enigo.scroll(*dy, Axis::Vertical).is_ok() {
+                let vertical = if *dy != 0 {
+                    self.enigo.scroll(*dy, Axis::Vertical).is_ok()
+                } else {
+                    true
+                };
+                let horizontal = if *dx != 0 {
+                    self.enigo.scroll(*dx, Axis::Horizontal).is_ok()
+                } else {
+                    true
+                };
+                if vertical && horizontal {
                     Response::Ok { message: "scrolled".into() }
-                } else if *dx != 0 && self.enigo.scroll(*dx, Axis::Horizontal).is_ok() {
-                    Response::Ok { message: "scrolled horizontally".into() }
                 } else {
                     Response::Error { message: "scroll failed".into() }
                 }
@@ -388,7 +418,7 @@ impl Controller {
             | Command::NewTab { .. } | Command::Back | Command::Forward
             | Command::Reload | Command::GetPolicy { .. }
             | Command::ModelStatus | Command::ModelLoad { .. } | Command::ModelUse { .. }
-            | Command::ModelStop => Response::Error {
+            | Command::ModelStop | Command::HoverId { .. } => Response::Error {
                 message: "command must be handled by the GUI event loop".into(),
             },
         };
