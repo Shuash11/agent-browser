@@ -292,6 +292,7 @@ fn build_tab(
     let dl_dir = downloads.clone();
     let lg_dir = logs.clone();
     Ok(WebViewBuilder::new_with_web_context(context)
+        .with_new_window_req_handler(|_url, _features| wry::NewWindowResponse::Allow)
         .with_initialization_script(SHADOW_TRACK_JS)
         .with_bounds(rect(TERMINAL_W + DIVIDER_W, TOOLBAR_H,
             WINDOW_W - TERMINAL_W - DIVIDER_W - TAB_W, WINDOW_H - TOOLBAR_H))
