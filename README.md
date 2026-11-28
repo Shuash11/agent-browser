@@ -51,7 +51,7 @@ Verified on Rust 1.99.1 / Windows 11 / WebView2 157.
 
 ## Operator recipe
 
-`AGENTS.md` contains a fixed recipe for search, read, click, stale IDs, hover, and form filling — follow it instead of inventing a strategy. Call `browser_help {"tool":"..."}` any time to get the exact JSON shape for a tool. All 33 tools remain available; there is no reduced-tool default.
+`AGENTS.md` contains a fixed recipe for search, read, click, stale IDs, hover, and form filling — follow it instead of inventing a strategy. ID-based clicks are DOM-targeted (they do not move your cursor); coordinate clicks still use the real cursor for canvas/drag cases. Call `browser_help {"tool":"..."}` any time to get the exact JSON shape for a tool. All 33 tools remain available; there is no reduced-tool default.
 
 ## Local model (confidential work)
 

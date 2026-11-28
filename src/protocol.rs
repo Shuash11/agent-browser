@@ -85,6 +85,8 @@ pub enum Command {
     HoverId { id: String },
     /// Resolve a layout ID to screen coordinates without returning the full layout.
     ResolveId { id: String, refresh: bool },
+    /// Click a layout element directly in the DOM (no OS cursor movement).
+    DomClick { id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

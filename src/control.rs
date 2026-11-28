@@ -231,6 +231,7 @@ impl Controller {
             Command::ModelStop => "model_stop",
             Command::HoverId { .. } => "hover_id",
             Command::ResolveId { .. } => "resolve_id",
+            Command::DomClick { .. } => "dom_click",
         };
         let line = format!("{{\"ts\":{ts},\"action\":\"{name}\",\"ok\":{ok}}}\n");
         if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -346,6 +347,21 @@ impl Controller {
                     Response::Ok { message: "moved".into() }
                 } else {
                     Response::Error { message: "mouse move failed".into() }
+                }
+            }
+            Command::DomClick { id } => {
+                if is_password && !crate::policy::policy().allow_password_entry {
+                    Response::Error { message: "refused: password field".into() }
+                } else {
+                    let index = id.strip_prefix('e')
+                        .and_then(|s| s.parse::<usize>().ok())
+                        .map(|n| n.saturating_sub(1));
+                    match index {
+                        Some(i) if webview.evaluate_script(&crate::gui::dom_click_js(i)).is_ok() => {
+                            Response::Ok { message: format!("clicked {id} in DOM") }
+                        }
+                        _ => Response::Error { message: format!("could not click {id} in DOM") },
+                    }
                 }
             }
             Command::Click { x, y, button } => {

@@ -335,6 +335,19 @@ fn build_tab(
         .build_as_child(window)?)
 }
 
+/// JS that clicks one element from the same filtered set used by the layout
+/// cache, by its stable index. No OS cursor movement, no coordinate math.
+pub fn dom_click_js(index: usize) -> String {
+    format!(
+        "(function(){{var out=[];var els=document.querySelectorAll(\
+         'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[onclick]');\
+         for(var i=0;i<els.length;i++){{var e=els[i];var r=e.getBoundingClientRect();\
+         if(r.width<2||r.height<2||r.bottom<0||r.top>window.innerHeight)continue;\
+         var s=getComputedStyle(e);if(s.visibility==='hidden'||s.display==='none'||s.opacity==='0')continue;\
+         out.push(e);}}var t=out[{index}];if(!t)return false;t.click();return true;}})()"
+    )
+}
+
 fn page_text_js() -> String {
     "(function(){return JSON.stringify({title:document.title,url:location.href,\
      text:(document.body&&document.body.innerText||'')});})()".to_string()
@@ -1232,8 +1245,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
 
                     let mut pending_type: Option<String> = None;
                     let mut resolved_id: Option<String> = None;
+                    let mut resolved_point: Option<(i32, i32)> = None;
+                    let mut is_dom_click = false;
                     if let crate::protocol::Command::ClickId { id } = &cmd {
                         resolved_id = Some(id.clone());
+                    }
+                    if let crate::protocol::Command::DomClick { id } = &cmd {
+                        resolved_id = Some(id.clone());
+                        is_dom_click = true;
                     }
                     if let crate::protocol::Command::TypeId { id, text } = &cmd {
                         resolved_id = Some(id.clone());
@@ -1252,11 +1271,14 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                         let found = layout_cache.entries.iter().find(|e| e.id == id).cloned();
                         match found {
                             Some(el) => {
-                                cmd = crate::protocol::Command::Click {
-                                    x: el.sx,
-                                    y: el.sy,
-                                    button: crate::protocol::MouseButton::Left,
-                                };
+                                resolved_point = Some((el.sx, el.sy));
+                                if !is_dom_click {
+                                    cmd = crate::protocol::Command::Click {
+                                        x: el.sx,
+                                        y: el.sy,
+                                        button: crate::protocol::MouseButton::Left,
+                                    };
+                                }
                             }
                             None => {
                                 let _ = reply.send(crate::protocol::Response::Error {
@@ -1309,7 +1331,8 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                             if crate::control::key_produces_text(key));
                     let needs_check = (matches!(cmd,
                         crate::protocol::Command::Click { .. }
-                            | crate::protocol::Command::Type { .. })
+                            | crate::protocol::Command::Type { .. }
+                            | crate::protocol::Command::DomClick { .. })
                         || key_writes)
                         && !outside_click;
                     if needs_check {
@@ -1319,6 +1342,11 @@ pub fn run_gui() -> Result<(), Box<dyn std::error::Error>> {
                                 Some((((*x as i64 - v.x as i64).clamp(i32::MIN as i64, i32::MAX as i64)) as i32,
                                       ((*y as i64 - v.y as i64).clamp(i32::MIN as i64, i32::MAX as i64)) as i32))
                             }
+                            crate::protocol::Command::DomClick { .. } => resolved_point.map(|(x, y)| {
+                                let v = controller.viewport();
+                                (((x as i64 - v.x as i64).clamp(i32::MIN as i64, i32::MAX as i64)) as i32,
+                                 ((y as i64 - v.y as i64).clamp(i32::MIN as i64, i32::MAX as i64)) as i32)
+                            }),
                             _ => None,
                         };
                         let js = crate::control::Controller::password_check_js(relative);

@@ -160,8 +160,8 @@ fn url_encode(s: &str) -> String {
 fn help_json(filter: Option<&str>) -> String {
     let entries: &[(&str, &str, &str)] = &[
         ("browser_layout", "List interactive elements with IDs.", "{\"refresh\":false}"),
-        ("browser_click_id", "Click an element by ID from browser_layout.", "{\"id\":\"e3\"}"),
-        ("browser_type_id", "Type text into an element by ID.", "{\"id\":\"e5\",\"text\":\"hello\"}"),
+        ("browser_click_id", "DOM-click an element by ID (no cursor movement).", "{\"id\":\"e3\"}"),
+        ("browser_type_id", "DOM-click then type into an element by ID.", "{\"id\":\"e5\",\"text\":\"hello\"}"),
         ("browser_page_text", "Read page title, URL and text.", "{}"),
         ("browser_page_elements", "Raw interactive element list.", "{}"),
         ("browser_hover", "Hover an element by ID and refresh layout.", "{\"id\":\"e4\"}"),
@@ -220,30 +220,6 @@ fn pack(r: Result<Response, String>) -> Result<String, McpError> {
             .map_err(|e| McpError::internal_error(e.to_string(), None)),
         Err(msg) => Err(McpError::internal_error(msg, None)),
     }
-}
-
-/// Should ID-based actions rescan the DOM first? Read from the GUI-owned
-/// policy so the bridge and GUI agree on the active value.
-async fn fresh_layout_enabled() -> Result<bool, McpError> {
-    let text = pack(ipc::call(Command::GetPolicy { reload: false }).await)?;
-    let value: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| McpError::internal_error(format!("bad policy JSON: {e}"), None))?;
-    Ok(value.get("fresh_layout_actions").and_then(|v| v.as_bool()).unwrap_or(true))
-}
-
-/// Resolve a stable layout ID to current screen coordinates via a fresh scan.
-async fn fresh_coords(id: &str) -> Result<(i32, i32), McpError> {
-    // Lightweight: the GUI returns only {x,y}, not the whole layout JSON.
-    let text = pack(ipc::call(Command::ResolveId { id: id.to_string(), refresh: true }).await)?;
-    let value: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| McpError::internal_error(format!("bad resolve JSON: {e}"), None))?;
-    let x = value.get("x").and_then(|v| v.as_i64())
-        .ok_or_else(|| McpError::invalid_params(
-            value.get("message").and_then(|v| v.as_str()).unwrap_or("could not resolve ID").to_string(),
-            None,
-        ))? as i32;
-    let y = value.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-    Ok((x, y))
 }
 
 #[derive(Clone)]
@@ -344,34 +320,25 @@ impl BrowserService {
         pack(ipc::call(Command::Layout { refresh: p.refresh.unwrap_or(false) }).await)
     }
 
-    #[tool(description = "Click by layout ID. {\"id\":\"e3\"}")]
+    #[tool(description = "Click by layout ID in the DOM (no cursor movement). {\"id\":\"e3\"}")]
     async fn browser_click_id(
         &self,
         Parameters(p): Parameters<IdParams>,
     ) -> Result<String, McpError> {
-        if fresh_layout_enabled().await? {
-            let (x, y) = fresh_coords(&p.id).await?;
-            pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)
-        } else {
-            pack(ipc::call(Command::ClickId { id: p.id }).await)
-        }
+        // ID clicks are DOM-targeted by default: exact element, no cursor movement.
+        pack(ipc::call(Command::DomClick { id: p.id }).await)
     }
 
-    #[tool(description = "Type into layout ID. {\"id\":\"e5\",\"text\":\"hello\"}")]
+    #[tool(description = "Type into layout ID via DOM click, then type. {\"id\":\"e5\",\"text\":\"hello\"}")]
     async fn browser_type_id(
         &self,
         Parameters(p): Parameters<TypeIdParams>,
     ) -> Result<String, McpError> {
-        if fresh_layout_enabled().await? {
-            let (x, y) = fresh_coords(&p.id).await?;
-            let clicked = pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)?;
-            if clicked.contains("\"status\":\"error\"") {
-                return Ok(clicked);
-            }
-            pack(ipc::call(Command::Type { text: p.text }).await)
-        } else {
-            pack(ipc::call(Command::TypeId { id: p.id, text: p.text }).await)
+        let clicked = pack(ipc::call(Command::DomClick { id: p.id }).await)?;
+        if clicked.contains("\"status\":\"error\"") {
+            return Ok(clicked);
         }
+        pack(ipc::call(Command::Type { text: p.text }).await)
     }
 
     #[tool(description = "Read page title, URL and text. {}")]
@@ -507,7 +474,6 @@ impl BrowserService {
         if p.steps.is_empty() || p.steps.len() > 20 {
             return Err(McpError::invalid_params("steps must contain 1 to 20 actions", None));
         }
-        let fresh = fresh_layout_enabled().await?;
         let mut results = Vec::new();
         for (i, step) in p.steps.iter().enumerate() {
             let op = step.op.to_ascii_lowercase();
@@ -522,12 +488,7 @@ impl BrowserService {
                     let id = step.id.clone().ok_or_else(|| {
                         McpError::invalid_params("click_id needs id", None)
                     })?;
-                    if fresh {
-                        let (x, y) = fresh_coords(&id).await?;
-                        pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)
-                    } else {
-                        pack(ipc::call(Command::ClickId { id }).await)
-                    }
+                    pack(ipc::call(Command::DomClick { id }).await)
                 }
                 "type_id" => {
                     let id = step.id.clone().ok_or_else(|| {
@@ -536,16 +497,11 @@ impl BrowserService {
                     let text = step.text.clone().ok_or_else(|| {
                         McpError::invalid_params("type_id needs text", None)
                     })?;
-                    if fresh {
-                        let (x, y) = fresh_coords(&id).await?;
-                        let clicked = pack(ipc::call(Command::Click { x, y, button: MouseButton::Left }).await)?;
-                        if clicked.contains("\"status\":\"error\"") {
-                            Ok(clicked)
-                        } else {
-                            pack(ipc::call(Command::Type { text }).await)
-                        }
+                    let clicked = pack(ipc::call(Command::DomClick { id }).await)?;
+                    if clicked.contains("\"status\":\"error\"") {
+                        Ok(clicked)
                     } else {
-                        pack(ipc::call(Command::TypeId { id, text }).await)
+                        pack(ipc::call(Command::Type { text }).await)
                     }
                 }
                 "key" => {
