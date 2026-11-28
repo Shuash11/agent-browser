@@ -275,14 +275,18 @@ impl Controller {
         use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId, Sleep};
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId,
-            SetForegroundWindow, ShowWindow, SW_RESTORE,
+            IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
         };
         let hwnd = Self::find_gui_window();
         if hwnd.is_null() {
             return false;
         }
         unsafe {
-            ShowWindow(hwnd, SW_RESTORE);
+            // SW_RESTORE un-maximizes a maximized window. Only un-minimize a
+            // genuinely minimized window; never shrink the user's layout.
+            if IsIconic(hwnd) != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
             for _ in 0..4 {
                 let fg = GetForegroundWindow();
                 let fg_thread = GetWindowThreadProcessId(fg, std::ptr::null_mut());
